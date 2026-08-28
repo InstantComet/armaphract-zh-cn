@@ -1,0 +1,19 @@
+# 该仓库只管理汉化补丁，不管理原始游戏文件和 BepInEx 运行时生成物。
+*
+!.gitignore
+!VERSION
+!CHANGELOG.md
+!src/
+!src/HarmonyXUnitIntro/
+!src/HarmonyXUnitIntro/HarmonyXUnitIntro.csproj
+!src/HarmonyXUnitIntro/HarmonyXUnitIntroPlugin.cs
+!BepInEx/
+!BepInEx/config/
+!BepInEx/config/AutoTranslatorConfig.ini
+!BepInEx/plugins/
+!BepInEx/plugins/Armaphract.HarmonyXUnitIntro.dll
+!BepInEx/Translation/
+!BepInEx/Translation/zh-CN/
+!BepInEx/Translation/zh-CN/Text/
+!BepInEx/Translation/zh-CN/Text/armaphract_zh-CN.txt
+!BepInEx/Translation/zh-CN/Text/UI_Manual.txt

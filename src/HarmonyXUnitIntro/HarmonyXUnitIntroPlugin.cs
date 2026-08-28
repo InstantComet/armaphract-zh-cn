@@ -19,7 +19,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Unit Intro";
-    public const string Version = "1.2.0";
+    public const string Version = "1.6.3";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -33,6 +33,20 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static readonly Dictionary<int, TextState> AppliedStates = new();
     private static readonly Dictionary<int, string> LastProcessedTexts = new();
     private static readonly Dictionary<string, string> TranslationCache = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> ExactLabelKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "OPS",
+        "COMPANY",
+        "SYSTEMS",
+        "SORTIE",
+    };
+    private static readonly HashSet<string> ScaledLabelKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "OPS",
+        "COMPANY",
+        "SYSTEMS",
+        "ASPERA",
+    };
     private static DateTime MappingTimestampUtc;
     private static bool MappingsLoaded;
     private static bool TranslationsEnabled = true;
@@ -71,16 +85,17 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 
     private static void TmpTextPrefix(TMP_Text __instance, ref string value)
     {
-        TextPrefix(__instance.GetInstanceID(), ref value);
+        TextPrefix(__instance, ref value);
     }
 
     private static void LegacyTextPrefix(LegacyText __instance, ref string value)
     {
-        TextPrefix(__instance.GetInstanceID(), ref value);
+        TextPrefix(__instance, ref value);
     }
 
-    private static void TextPrefix(int instanceId, ref string value)
+    private static void TextPrefix(Component component, ref string value)
     {
+        var instanceId = component.GetInstanceID();
         if (!TranslationsEnabled)
         {
             if (AppliedStates.TryGetValue(instanceId, out var state) &&
@@ -101,10 +116,55 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 
         if (TryTranslate(source, out var translated))
         {
+            translated = ApplyContextLayout(component, source, translated);
             AppliedStates[instanceId] = new TextState(source, translated);
             LastProcessedTexts[instanceId] = translated;
             value = translated;
         }
+    }
+
+    private static string ApplyContextLayout(Component component, string source, string translated)
+    {
+        var plainSource = Regex.Replace(source, "<[^>]+>", string.Empty).Trim();
+        if (component is TMP_Text &&
+            (ScaledLabelKeys.Contains(plainSource) || IsEnvironmentPanelText(plainSource)))
+            return $"<size=70%>{translated}</size>";
+
+        if (!string.Equals(plainSource, "FRONT", StringComparison.OrdinalIgnoreCase))
+            return translated;
+
+        // The turret's right-hand FRONT label is named topFrontal. Both armor
+        // panels otherwise share the same source string, so translation data
+        // alone cannot distinguish them. An invisible glyph extends the label's
+        // layout width and moves the visible centered text left into alignment.
+        var current = component.transform;
+        for (var depth = 0; current != null && depth < 12; depth++, current = current.parent)
+        {
+            if (string.Equals(current.name, "topFrontal", StringComparison.OrdinalIgnoreCase))
+            {
+                Logger?.LogInfo($"Applied turret FRONT alignment to {component.name}.");
+                return translated + "<color=#00000000>F</color>";
+            }
+        }
+
+        return translated;
+    }
+
+    private static bool IsEnvironmentPanelText(string source)
+    {
+        if (string.Equals(source, "OPPOSITION FORCES", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (source.Contains("DISTRICT", StringComparison.OrdinalIgnoreCase) &&
+            source.Contains("ENVIRON DATA", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return source.StartsWith("WEATHER:", StringComparison.OrdinalIgnoreCase) ||
+            source.StartsWith("MAG. FD:", StringComparison.OrdinalIgnoreCase) ||
+            source.StartsWith("INTERF.:", StringComparison.OrdinalIgnoreCase) ||
+            source.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) ||
+            source.StartsWith("DAY:", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryTranslate(string value, out string translated)
@@ -118,8 +178,14 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 
         var result = value;
         var changed = false;
+        var plainValue = Regex.Replace(value, "<[^>]+>", string.Empty).Trim();
         foreach (var mapping in Mappings)
         {
+            if (ExactLabelKeys.Contains(mapping.Key) &&
+                !string.Equals(plainValue, mapping.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             if (value.IndexOf(mapping.FirstToken, StringComparison.OrdinalIgnoreCase) < 0)
                 continue;
             result = ReplaceSegment(result, mapping, ref changed);
@@ -331,6 +397,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
                     }
                     if (TryTranslate(current, out var translated))
                     {
+                        translated = ApplyContextLayout(text, current, translated);
                         AppliedStates[instanceId] = new TextState(current, translated);
                         LastProcessedTexts[instanceId] = translated;
                         text.text = translated;
@@ -358,6 +425,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
                     }
                     if (TryTranslate(current, out var translated))
                     {
+                        translated = ApplyContextLayout(text, current, translated);
                         AppliedStates[instanceId] = new TextState(current, translated);
                         LastProcessedTexts[instanceId] = translated;
                         text.text = translated;

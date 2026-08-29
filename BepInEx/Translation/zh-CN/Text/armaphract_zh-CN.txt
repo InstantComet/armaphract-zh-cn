@@ -65,6 +65,14 @@ UNUSED AMMO SLOTS=有空闲弹药槽
 <color\=orange>V</color> to queue a deploy order on any unit which is carrying infantry.\nTroop compartment modules are required to bring dismounts.=按 <color=orange>V</color>，可将部署指令加入任何搭载步兵单位的队列。\n必须安装载员舱模块才能携带步兵。
 <color\=orange>X</color> to turn on damage control for a unit.\nAll crew will focus on controlling fires, repairs, and preventing ammunition cookoffs. This option can only be enabled when damage to the vehicle is substantial or if a cookoff is in progress.=按 <color=orange>X</color> 为单位启动损害管制。\n所有乘员都会集中处理灭火、维修以及防止弹药殉爆。只有当车辆受损严重或正在发生殉爆时，才能启用此选项。
 <color\=white>--- crew guide ---</color>\n> crew perform better when assigned to their role.\n> Well-trained crew perform better in all elements of combat.=<color=white>--- 乘员指南 ---</color>\n> 乘员被分配到对应岗位时表现更佳。\n> 训练有素的乘员在各项战斗环节中表现更佳。
+<color\=white>--- ammunition guide ---</color>\n> the <color\=yellow>UNIT MAGAZine</color> lists munitions to be carried into combat.\n> capacity can be increased with ammo modules.\nSelect ammunition types from the loading bay.\n> The <color\=white>munitions display</color> on the right offers a preview of loaded munitions.=<color=white>--- 弹药指南 ---</color>\n> <color=yellow>弹药舱</color>列出要带入战斗的弹药。\n> 可通过弹药模块提升容量。\n在装填舱选择弹药类型。\n> 右侧的<color=white>弹药显示</color>会预览已装填的弹药。
+<color\=white>--- ammunition guide ---</color>=<color=white>--- 弹药指南 ---</color>
+--- ammunition guide ---=--- 弹药指南 ---
+AMMUNITION GUIDE=弹药指南
+> the <color\=yellow>UNIT MAGAZine</color> lists munitions to be carried into combat.=> <color=yellow>弹药舱</color>列出要带入战斗的弹药。
+> capacity can be increased with ammo modules.=> 可通过弹药模块提升容量。
+Select ammunition types from the loading bay.=在装填舱选择弹药类型。
+> The <color\=white>munitions display</color> on the right offers a preview of loaded munitions.=> 右侧的<color=white>弹药显示</color>会预览已装填的弹药。
 <color\=white>--- module guide ---</color>\n> <color\=white>WHITE</color> modules fit in <color\=white>HARDPOINT</color> slots.\n> <color\=grey>GREY</color> modules fit in <color\=grey>OPEN SLOTS</color>.\n> Each slot has a limit to how many <color\=red>WEAPONS</color> and <color\=orange>ENGINES</color> can be installed.=<color=white>--- 模块指南 ---</color>\n> <color=white>白色</color>模块可安装在<color=white>挂点</color>槽位中。\n> <color=grey>灰色</color>模块可安装在<color=grey>开放槽位</color>中。\n> 每个槽位可安装的<color=red>武器</color>和<color=orange>引擎</color>数量均有限制。
 > <color\=grey>GREY</color> modules fit in <color\=grey>OPEN SLOTS</color>.=> <color=grey>灰色</color>模块可安装在<color=grey>开放槽位</color>中。
 > <color\=white>WHITE</color> modules fit in <color\=white>HARDPOINT</color> slots.=> <color=white>白色</color>模块可安装在<color=white>挂点</color>槽位中。
@@ -1302,3 +1310,4 @@ ZOOM LENS BLUR=变焦镜头模糊
 {string1} spotted.=发现 {string1}。
 {string1} taking fire!={string1} 遭到攻击！
 “In addition to tourniquets and defibrators, the autosyrettes of the M5T Trauma kit contains class-7 amphetamines to sustain combat capability in critically wounded vehicle crewmen. It is the medical officer’s responsibility to ensure the kit is properly secured in the presence of enlisted crew.” -Imperial Academy of Physical Medicine, Vol XXIII, pg.558.=“除止血带和除颤器外，M5T 创伤急救包中的自动注射器还装有 7 级安非他命，用于维持重伤车辆乘员的作战能力。医疗军官有责任确保在有士兵乘员在场时，该急救包得到妥善保管。”——帝国物理医学学院，第 XXIII 卷，第 558 页。
+NO AMMUNITION SELECTED=未选中弹药

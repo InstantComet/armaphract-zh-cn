@@ -1,5 +1,10 @@
 # ARMAPHRACT 简体中文补丁变更日志
 
+## [0.8.1] - 2026-08-29
+
+- 补充炮塔、乘员、装甲、发动机、发射器和传感器状态文本翻译。
+- 修订 `bloc army group north` 的多行显示译文。
+
 ## [0.8.0] - 2026-08-29
 
 - 更新已部署的 `Armaphract.HarmonyXLocalization.dll`，程序集版本为 `1.8.6`。

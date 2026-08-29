@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>Armaphract.HarmonyXLocalization</AssemblyName>
-    <Version>1.7.0</Version>
+    <Version>1.8.7</Version>
     <GameDir Condition="'$(GameDir)' == ''">$(MSBuildThisFileDirectory)..\..</GameDir>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -15,8 +15,10 @@
     <Reference Include="Il2Cppmscorlib" HintPath="$(GameDir)\BepInEx\interop\Il2Cppmscorlib.dll" Private="false" />
     <Reference Include="UnityEngine" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.dll" Private="false" />
     <Reference Include="UnityEngine.CoreModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.IMGUIModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.IMGUIModule.dll" Private="false" />
     <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.InputLegacyModule.dll" Private="false" />
     <Reference Include="UnityEngine.UI" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.UI.dll" Private="false" />
     <Reference Include="Unity.TextMeshPro" HintPath="$(GameDir)\BepInEx\interop\Unity.TextMeshPro.dll" Private="false" />
+    <Reference Include="Assembly-CSharp" HintPath="$(GameDir)\BepInEx\interop\Assembly-CSharp.dll" Private="false" />
   </ItemGroup>
 </Project>

@@ -16,17 +16,7 @@
 
 ## 安装
 
-准备一份合法的 ARMAPHRACT `0.6.3` 游戏目录，并先安装可用的 BepInEx IL2CPP 环境。首次启动一次游戏，让 BepInEx 生成 `interop` 文件。
-
-将本仓库中的 `BepInEx` 目录合并到游戏根目录，覆盖或新增以下补丁文件：
-
-```text
-BepInEx/config/AutoTranslatorConfig.ini
-BepInEx/plugins/Armaphract.HarmonyXLocalization.dll
-BepInEx/Translation/zh-CN/Text/armaphract_zh-CN.txt
-```
-
-如果目录中还存在旧版 `Armaphract.HarmonyXUnitIntro.dll`，请将其移除，避免同一补丁重复加载。旧版独立的 `UI_Manual.txt` 已不再由本仓库提供；如目标目录中仍有旧文件，可一并移除。启动游戏后，汉化插件会自动加载；`Alt+T` 可临时切换翻译开关。
+准备一份合法的 ARMAPHRACT `0.6.3`,启动汉化补丁，选中 armaphract.exe 然后点击 开始安装 即可
 
 ## 从源码构建
 

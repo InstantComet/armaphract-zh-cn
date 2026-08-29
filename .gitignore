@@ -14,7 +14,6 @@
 !BepInEx/config/
 !BepInEx/config/AutoTranslatorConfig.ini
 !BepInEx/plugins/
-!BepInEx/plugins/Armaphract.HarmonyXUnitIntro.dll
 !BepInEx/plugins/Armaphract.HarmonyXLocalization.dll
 !BepInEx/Translation/
 !BepInEx/Translation/zh-CN/

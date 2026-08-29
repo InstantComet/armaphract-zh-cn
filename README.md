@@ -6,7 +6,7 @@
 
 ## 当前版本
 
-版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.4.1`。
+版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.4.2`。
 
 ## 安装
 

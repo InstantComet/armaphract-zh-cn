@@ -6,9 +6,13 @@
 
 本仓库只保存补丁内容，不包含游戏本体、Unity 资源、BepInEx 运行时依赖或自动生成缓存。
 
+项目地址：[github.com/InstantComet/armaphract-zh-cn](https://github.com/InstantComet/armaphract-zh-cn)
+
 ## 当前版本
 
-版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.4.2`。
+版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.5.1`。
+
+源码工程位于 [`src/HarmonyXLocalization`](src/HarmonyXLocalization)，已编译插件位于 `BepInEx/plugins/`。
 
 ## 安装
 
@@ -20,10 +24,9 @@
 BepInEx/config/AutoTranslatorConfig.ini
 BepInEx/plugins/Armaphract.HarmonyXLocalization.dll
 BepInEx/Translation/zh-CN/Text/armaphract_zh-CN.txt
-BepInEx/Translation/zh-CN/Text/UI_Manual.txt
 ```
 
-如果目录中还存在旧版 `Armaphract.HarmonyXUnitIntro.dll`，请将其移除，避免同一补丁重复加载。启动游戏后，汉化插件会自动加载；`Alt+T` 可临时切换翻译开关。
+如果目录中还存在旧版 `Armaphract.HarmonyXUnitIntro.dll`，请将其移除，避免同一补丁重复加载。旧版独立的 `UI_Manual.txt` 已不再由本仓库提供；如目标目录中仍有旧文件，可一并移除。启动游戏后，汉化插件会自动加载；`Alt+T` 可临时切换翻译开关。
 
 ## 从源码构建
 
@@ -36,8 +39,9 @@ dotnet build .\src\HarmonyXLocalization\HarmonyXLocalization.csproj --configurat
 如果仓库与游戏目录分开存放，用 `GameDir` 指定实际游戏目录：
 
 ```powershell
+$gameDir = 'D:\Games\armaphract_0.6.3'
 dotnet build .\src\HarmonyXLocalization\HarmonyXLocalization.csproj --configuration Release `
-  -p:GameDir="F:\sharedrive\游戏\armaphract_0.6.3"
+  -p:GameDir=$gameDir
 ```
 
 构建输出位于 `src/HarmonyXLocalization/bin/Release/net6.0/`。将生成的 `Armaphract.HarmonyXLocalization.dll` 复制到游戏目录的 `BepInEx/plugins/` 后即可测试。

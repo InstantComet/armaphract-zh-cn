@@ -1,5 +1,12 @@
 # ARMAPHRACT 简体中文补丁变更日志
 
+## [0.4.1] - 2026-08-29
+
+- 添加适合 GitHub 的项目说明、构建说明和版权声明。
+- 增加 `GameDir` MSBuild 参数，支持仓库与游戏目录分开存放时构建 HarmonyX 插件。
+- 整理 HarmonyX 源码目录和工程文件名称为 `HarmonyXLocalization`。
+- 增加 `.gitattributes`，明确文本和 DLL 的版本库处理方式。
+
 ## [0.4.0] - 2026-08-29
 
 - 将 HarmonyX 插件重命名为 `Armaphract.HarmonyXLocalization`，版本更新至 `1.7.0`。

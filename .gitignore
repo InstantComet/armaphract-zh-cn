@@ -1,12 +1,15 @@
 # 该仓库只管理汉化补丁，不管理原始游戏文件和 BepInEx 运行时生成物。
 *
 !.gitignore
+!.gitattributes
+!README.md
+!LICENSE
 !VERSION
 !CHANGELOG.md
 !src/
-!src/HarmonyXUnitIntro/
-!src/HarmonyXUnitIntro/HarmonyXUnitIntro.csproj
-!src/HarmonyXUnitIntro/HarmonyXUnitIntroPlugin.cs
+!src/HarmonyXLocalization/
+!src/HarmonyXLocalization/HarmonyXLocalization.csproj
+!src/HarmonyXLocalization/HarmonyXUnitIntroPlugin.cs
 !BepInEx/
 !BepInEx/config/
 !BepInEx/config/AutoTranslatorConfig.ini

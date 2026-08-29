@@ -10,7 +10,7 @@
 
 ## 当前版本
 
-版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.5.1`。
+版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.5.2`。
 
 源码工程位于 [`src/HarmonyXLocalization`](src/HarmonyXLocalization)，已编译插件位于 `BepInEx/plugins/`。
 
@@ -39,9 +39,9 @@ dotnet build .\src\HarmonyXLocalization\HarmonyXLocalization.csproj --configurat
 如果仓库与游戏目录分开存放，用 `GameDir` 指定实际游戏目录：
 
 ```powershell
-$gameDir = 'D:\Games\armaphract_0.6.3'
+$gameDir = Read-Host '请输入 ARMAPHRACT 游戏目录的完整路径'
 dotnet build .\src\HarmonyXLocalization\HarmonyXLocalization.csproj --configuration Release `
-  -p:GameDir=$gameDir
+  "-p:GameDir=$gameDir"
 ```
 
 构建输出位于 `src/HarmonyXLocalization/bin/Release/net6.0/`。将生成的 `Armaphract.HarmonyXLocalization.dll` 复制到游戏目录的 `BepInEx/plugins/` 后即可测试。

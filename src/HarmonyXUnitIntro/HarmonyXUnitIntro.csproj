@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
-    <AssemblyName>Armaphract.HarmonyXUnitIntro</AssemblyName>
-    <Version>1.6.5</Version>
+    <AssemblyName>Armaphract.HarmonyXLocalization</AssemblyName>
+    <Version>1.7.0</Version>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>

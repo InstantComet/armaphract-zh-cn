@@ -18,8 +18,8 @@ namespace Armaphract.HarmonyXUnitIntro;
 public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
-    public const string Name = "Armaphract HarmonyX Unit Intro";
-    public const string Version = "1.6.5";
+    public const string Name = "Armaphract HarmonyX Localization";
+    public const string Version = "1.7.0";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -33,6 +33,9 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static readonly Dictionary<int, TextState> AppliedStates = new();
     private static readonly Dictionary<int, string> LastProcessedTexts = new();
     private static readonly Dictionary<string, string> TranslationCache = new(StringComparer.Ordinal);
+    private static readonly Regex QuadTrackedSegmentPattern = new(
+        @"[\[［]?(?:QUAD\s+TRACKED|SQUAD\s+TRACKED|四\s*履带(?:式)?)[\]］]?\s*[:：]\s*A\s+SECOND\s+SET\s+OF\s+TRACKS\b.*?\bDETRACKED\.?",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline | RegexOptions.Compiled);
     private static readonly HashSet<string> ExactLabelKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "OPS",
@@ -91,7 +94,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
             AccessTools.PropertySetter(typeof(LegacyText), nameof(LegacyText.text)),
             prefix: new HarmonyMethod(typeof(HarmonyXUnitIntroPlugin), nameof(LegacyTextPrefix)));
         AddComponent<RefreshComponent>();
-        Log.LogInfo("HarmonyX unit introduction patch loaded for TMP_Text and UnityEngine.UI.Text; Alt+T toggle enabled.");
+        Log.LogInfo("HarmonyX localization loaded for TMP_Text and UnityEngine.UI.Text; Alt+T toggle enabled.");
     }
 
     private static void TmpTextPrefix(TMP_Text __instance, ref string value)
@@ -195,20 +198,16 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static bool TryTranslate(string value, out string translated)
     {
         ReloadMappingsIfChanged();
-        if (IsQuadTrackedDescription(value))
-        {
-            translated = "[四履带]：第二组履带提高机动性，并可在履带受损时继续有限移动。";
-            TranslationCache[value] = translated;
-            return true;
-        }
         if (TranslationCache.TryGetValue(value, out var cached))
         {
             translated = cached;
             return !string.Equals(value, cached, StringComparison.Ordinal);
         }
 
-        var result = value;
-        var changed = false;
+        var result = QuadTrackedSegmentPattern.Replace(
+            value,
+            "[四履带]：第二组履带提高机动性，并可在履带受损时继续有限移动。");
+        var changed = !string.Equals(result, value, StringComparison.Ordinal);
         var plainValue = Regex.Replace(value, "<[^>]+>", string.Empty).Trim();
         foreach (var mapping in Mappings)
         {
@@ -226,13 +225,6 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         TranslationCache[value] = result;
         translated = result;
         return changed;
-    }
-
-    private static bool IsQuadTrackedDescription(string value)
-    {
-        return value.Contains("QUAD TRACKED", StringComparison.OrdinalIgnoreCase) &&
-            value.Contains("A SECOND SET OF TRACKS", StringComparison.OrdinalIgnoreCase) &&
-            value.Contains("DETRACKED", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ReloadMappingsIfChanged()
@@ -262,7 +254,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
             }
             catch (System.Exception ex)
             {
-                Logger?.LogWarning($"Could not read external unit-intro mappings: {ex.Message}");
+                Logger?.LogWarning($"Could not read external localization mappings: {ex.Message}");
             }
         }
 
@@ -279,7 +271,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         TranslationCache.Clear();
         MappingTimestampUtc = timestamp;
         MappingsLoaded = true;
-        Logger?.LogInfo($"Loaded {Mappings.Count} unit-intro mappings from {MappingPath}.");
+        Logger?.LogInfo($"Loaded {Mappings.Count} localization mappings from {MappingPath}.");
     }
 
     private static string Unescape(string value)
@@ -369,7 +361,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 
         TranslationsEnabled = !TranslationsEnabled;
         LastProcessedTexts.Clear();
-        Logger?.LogInfo($"HarmonyX unit-intro translations {(TranslationsEnabled ? "enabled" : "disabled")} by Alt+T.");
+        Logger?.LogInfo($"HarmonyX localization {(TranslationsEnabled ? "enabled" : "disabled")} by Alt+T.");
     }
 
     private static void RestoreIfDisabled(int instanceId, Component component)
@@ -417,7 +409,12 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
             {
                 yield return null;
                 HandleToggleHotkey();
-                if (++frameCounter % 60 != 0)
+                // Some IL2CPP UI paths update native TMP backing fields without
+                // invoking the managed text setter.  A one-second (60-frame)
+                // fallback scan left English visible before translation.  Five
+                // frames keeps the fallback effectively immediate while the
+                // per-instance cache below avoids redundant replacements.
+                if (++frameCounter % 5 != 0)
                     continue;
                 foreach (var text in FindObjectsByType<TMP_Text>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
                 {

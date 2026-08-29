@@ -19,7 +19,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Unit Intro";
-    public const string Version = "1.6.3";
+    public const string Version = "1.6.5";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -46,6 +46,17 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         "COMPANY",
         "SYSTEMS",
         "ASPERA",
+    };
+    private static readonly HashSet<string> EnlargedSettingsLabelKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SOUND",
+        "MASTER",
+        "MUSIC",
+        "SFX",
+        "UI",
+        "ZOOM LENS BLUR",
+        "CRT DISPLAY EFFECT",
+        "SLOW TIME WITH MOUSE CONTROLS",
     };
     private static DateTime MappingTimestampUtc;
     private static bool MappingsLoaded;
@@ -126,6 +137,9 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static string ApplyContextLayout(Component component, string source, string translated)
     {
         var plainSource = Regex.Replace(source, "<[^>]+>", string.Empty).Trim();
+        if (component is TMP_Text && IsSettingsLabelText(plainSource))
+            return $"<size=120%>{translated}</size>";
+
         if (component is TMP_Text &&
             (ScaledLabelKeys.Contains(plainSource) || IsEnvironmentPanelText(plainSource)))
             return $"<size=70%>{translated}</size>";
@@ -150,6 +164,17 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         return translated;
     }
 
+    private static bool IsSettingsLabelText(string source)
+    {
+        if (EnlargedSettingsLabelKeys.Contains(source))
+            return true;
+
+        return source.Contains("SOUND", StringComparison.OrdinalIgnoreCase) &&
+            source.Contains("MASTER", StringComparison.OrdinalIgnoreCase) &&
+            source.Contains("MUSIC", StringComparison.OrdinalIgnoreCase) &&
+            source.Contains("SFX", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsEnvironmentPanelText(string source)
     {
         if (string.Equals(source, "OPPOSITION FORCES", StringComparison.OrdinalIgnoreCase))
@@ -170,6 +195,12 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static bool TryTranslate(string value, out string translated)
     {
         ReloadMappingsIfChanged();
+        if (IsQuadTrackedDescription(value))
+        {
+            translated = "[四履带]：第二组履带提高机动性，并可在履带受损时继续有限移动。";
+            TranslationCache[value] = translated;
+            return true;
+        }
         if (TranslationCache.TryGetValue(value, out var cached))
         {
             translated = cached;
@@ -195,6 +226,13 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         TranslationCache[value] = result;
         translated = result;
         return changed;
+    }
+
+    private static bool IsQuadTrackedDescription(string value)
+    {
+        return value.Contains("QUAD TRACKED", StringComparison.OrdinalIgnoreCase) &&
+            value.Contains("A SECOND SET OF TRACKS", StringComparison.OrdinalIgnoreCase) &&
+            value.Contains("DETRACKED", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ReloadMappingsIfChanged()
@@ -299,8 +337,14 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
                 throw new ArgumentException("Mapping key is empty.", nameof(key));
 
             FirstToken = Regex.Unescape(words[0]);
+            var pattern = string.Join(@"\s+", words);
+            var trimmedKey = key.Trim();
+            if (char.IsLetterOrDigit(trimmedKey[0]))
+                pattern = @"(?<![\p{L}\p{N}_])" + pattern;
+            if (char.IsLetterOrDigit(trimmedKey[^1]))
+                pattern += @"(?![\p{L}\p{N}_])";
             Pattern = new Regex(
-                string.Join(@"\s+", words),
+                pattern,
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
         }
 

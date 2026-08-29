@@ -1,8 +1,6 @@
-# ARMAPHRACT 0.6.3 简体中文补丁
+# ARMAPHRACT(暂定译名：装甲重骑) 0.6.3 简体中文补丁
 
-这是针对 ARMAPHRACT `0.6.3` 的简体中文本地化补丁，运行于 BepInEx IL2CPP 环境，并使用 HarmonyX 处理部分游戏 UI 文本。
-
-术语约定：`Armaphract` 的中文译名暂定为“装甲重骑”。英文原文键保持不变，译文值和项目说明使用该中文名。
+这是针对 ARMAPHRACT(暂定译名：装甲重骑) `0.6.3` 的简体中文本地化补丁，运行于 BepInEx IL2CPP 环境，并使用 HarmonyX 处理部分游戏 UI 文本。
 
 本仓库只保存补丁内容，不包含游戏本体、Unity 资源、BepInEx 运行时依赖或自动生成缓存。
 

@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.8.33";
+    public const string Version = "1.8.34";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -74,7 +74,11 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     {
         // Same English text is used for two different contexts. Preserve
         // title case for the extraction objective and uppercase for the menu.
-        "Exit", "EXIT"
+        "Exit", "EXIT",
+        // Dynamic module statuses are emitted in uppercase. Keep this suffix
+        // fallback case-sensitive so normal prose such as "broken mirror" is
+        // handled only by its complete sentence mapping.
+        "BROKEN"
     };
     private static DateTime MappingTimestampUtc;
     private static DateTime NextMappingCheckUtc;

@@ -1,5 +1,11 @@
 # ARMAPHRACT 简体中文补丁变更日志
 
+## [0.8.7] - 2026-08-31
+
+- 补充 `BROKEN`、`SUPPORT ENGINE BROKEN`、`NEXT`、`RETRY`、`HAZARD PAY`、`SQUAD LOSSES` 和 `SQUAD REPAIR COSTS` 等文本翻译。
+- 修订岗位状态栏译文，优化动态状态后缀 `BROKEN` 的 HarmonyX 回退处理。
+- HarmonyX 源码与部署 DLL 统一更新至程序集版本 `1.8.34`。
+
 ## [0.8.6] - 2026-08-31
 
 - 补充 `MORNING`、`HIGHBURN`、`NIGHT` 和 `EVENING` 时间段文本翻译。

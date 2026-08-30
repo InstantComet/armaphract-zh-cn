@@ -10,7 +10,7 @@
 
 ## 当前版本
 
-版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.8.6`。
+版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.8.7`。
 
 源码工程位于 [`src/HarmonyXLocalization`](src/HarmonyXLocalization)，已编译插件位于 `BepInEx/plugins/`。
 

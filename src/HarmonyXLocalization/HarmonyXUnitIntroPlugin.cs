@@ -20,7 +20,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.8.13";
+    public const string Version = "1.8.14";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -91,6 +91,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     };
     private const float ManualGuideImGuiFontScale = 1.6f;
     private const float StatusOverlayFontScale = 1.4f;
+    private const string MainMenuSceneName = "menu";
     private static readonly HashSet<GUIStyle> ActiveManualGuideStyles = new();
 
     internal static readonly string Original =
@@ -223,9 +224,8 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         if (LastProcessedTexts.TryGetValue(instanceId, out var last) &&
             string.Equals(current, last, StringComparison.Ordinal))
             return;
-        if (string.IsNullOrEmpty(current) || !TryTranslate(current, out var translated))
+        if (string.IsNullOrEmpty(current) || !TryTranslateForDisplay(component, current, out var translated))
             return;
-        translated = ApplyContextLayout(component, current, translated);
         SetComponentText(component, current, translated);
     }
 
@@ -469,6 +469,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         }
         if (TryTranslate(text, out var translated))
             text = translated;
+        text = AppendMainMenuVersionCredit(text);
     }
 
     private static void TextPrefix(Component component, ref string value)
@@ -519,13 +520,12 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
             }
         }
 
-        if (TryTranslate(source, out var translated))
-        {
-            translated = ApplyContextLayout(component, source, translated);
-            AppliedStates[instanceId] = new TextState(source, translated);
-            LastProcessedTexts[instanceId] = translated;
-            value = translated;
-        }
+        if (!TryTranslateForDisplay(component, source, out var translated))
+            return;
+
+        AppliedStates[instanceId] = new TextState(source, translated);
+        LastProcessedTexts[instanceId] = translated;
+        value = translated;
     }
 
     private static void SetComponentText(Component component, string original, string translated)
@@ -554,6 +554,31 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         {
             InternalTextWrites.Remove(instanceId);
         }
+    }
+
+    private static bool TryTranslateForDisplay(Component component, string source, out string translated)
+    {
+        translated = source;
+        if (TryTranslate(source, out var mapped))
+            translated = ApplyContextLayout(component, source, mapped);
+
+        translated = AppendMainMenuVersionCredit(translated);
+        return !string.Equals(source, translated, StringComparison.Ordinal);
+    }
+
+    private static string AppendMainMenuVersionCredit(string value)
+    {
+        if (!string.Equals(SceneManager.GetActiveScene().name, MainMenuSceneName, StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("InstantComet", StringComparison.OrdinalIgnoreCase))
+            return value;
+
+        var match = Regex.Match(
+            value,
+            @"(?<![A-Za-z0-9])V0\.6\.3(?![A-Za-z0-9])",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success
+            ? value.Insert(match.Index + match.Length, "（InstantComet汉化）")
+            : value;
     }
 
     private static bool IsMixedLanguageText(string value)
@@ -1090,9 +1115,8 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
                         Logger?.LogInfo($"Found TMP text containing Celeres (length {current.Length}).");
                     }
                     ApplyKnownStatusOverlayFontLayout(text, current);
-                    if (TryTranslate(current, out var translated))
+                    if (TryTranslateForDisplay(text, current, out var translated))
                     {
-                        translated = ApplyContextLayout(text, current, translated);
                         SetComponentText(text, current, translated);
                     }
                 }
@@ -1117,9 +1141,8 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
                         Logger?.LogInfo($"Found legacy text containing SQUAD (length {current.Length}).");
                     }
                     ApplyKnownStatusOverlayFontLayout(text, current);
-                    if (TryTranslate(current, out var translated))
+                    if (TryTranslateForDisplay(text, current, out var translated))
                     {
-                        translated = ApplyContextLayout(text, current, translated);
                         SetComponentText(text, current, translated);
                     }
                 }

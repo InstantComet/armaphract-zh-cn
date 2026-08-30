@@ -20,7 +20,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.8.10";
+    public const string Version = "1.8.13";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -34,6 +34,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static readonly Dictionary<int, TextState> AppliedStates = new();
     private static readonly Dictionary<int, FontLayoutState> ObjectiveFontStates = new();
     private static readonly Dictionary<int, FontLayoutState> StatusOverlayFontStates = new();
+    private static readonly Dictionary<int, StatusOverlayTexts> StatusOverlayTextCache = new();
     private static readonly Dictionary<int, string> LastProcessedTexts = new();
     // Setting TMP_Text.text from the fallback scanner re-enters the patched
     // setter.  Keep that write out of the translation pipeline; otherwise a
@@ -44,6 +45,10 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static readonly HashSet<int> FrontLayoutLoggedIds = new();
     private static readonly HashSet<int> UiContextLoggedIds = new();
     private static readonly HashSet<string> ImGuiCandidatesLogged = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> ExactUiRoleKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "COMMAND", "DRIVER", "GUNNER", "LOADER"
+    };
     private static DateTime MappingTimestampUtc;
     private static bool MappingsLoaded;
     private static bool TranslationsEnabled = true;
@@ -214,6 +219,10 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
             LegacyText legacy => legacy.text,
             _ => string.Empty
         };
+        var instanceId = component.GetInstanceID();
+        if (LastProcessedTexts.TryGetValue(instanceId, out var last) &&
+            string.Equals(current, last, StringComparison.Ordinal))
+            return;
         if (string.IsNullOrEmpty(current) || !TryTranslate(current, out var translated))
             return;
         translated = ApplyContextLayout(component, current, translated);
@@ -253,6 +262,9 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         harmony.Patch(
             AccessTools.Method(typeof(UIManager), nameof(UIManager.SetScreenStatus), new[] { typeof(Unit) }),
             postfix: new HarmonyMethod(typeof(HarmonyXUnitIntroPlugin), nameof(UnitScreenStatusPostfix)));
+        harmony.Patch(
+            AccessTools.Method(typeof(UIManager), nameof(UIManager.ManageScreenStatuses)),
+            postfix: new HarmonyMethod(typeof(HarmonyXUnitIntroPlugin), nameof(ManageScreenStatusesPostfix)));
         harmony.Patch(
             AccessTools.Method(
                 typeof(UIManager),
@@ -296,14 +308,47 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         if (overlays == null || !overlays.TryGetValue(__0, out var overlay) || overlay == null)
             return;
 
-        // SetScreenStatus writes the combined world-space status block directly in
-        // native code, bypassing TMP_Text.text/SetText. Translate that exact text
-        // object immediately after the write, before Unity renders the frame.
-        var screenOverlay = overlay.GetComponent<ScreenOverlayUI>() ??
-                            overlay.GetComponentInChildren<ScreenOverlayUI>(true);
-        var statusText = screenOverlay?.statusText ?? overlay.GetComponentInChildren<TMP_Text>(true);
-        if (statusText != null)
-            TranslateCurrentComponent(statusText);
+        TranslateStatusOverlay(overlay);
+    }
+
+    private static void ManageScreenStatusesPostfix(UIManager __instance)
+    {
+        if (!TranslationsEnabled || __instance == null || __instance.unitsWithStatus == null)
+            return;
+
+        // This is the exact native refresh boundary that overwrites the status
+        // labels. Work only on already-known unit overlays, after their English
+        // values have been written and before Unity renders the frame.
+        foreach (var pair in __instance.unitsWithStatus)
+        {
+            if (pair.Value != null)
+                TranslateStatusOverlay(pair.Value);
+        }
+    }
+
+    private static void TranslateStatusOverlay(GameObject overlay)
+    {
+        var overlayId = overlay.GetInstanceID();
+        if (!StatusOverlayTextCache.TryGetValue(overlayId, out var texts))
+        {
+            if (StatusOverlayTextCache.Count >= 128)
+                StatusOverlayTextCache.Clear();
+            texts = new StatusOverlayTexts(
+                overlay.GetComponentsInChildren<TMP_Text>(true).ToList(),
+                overlay.GetComponentsInChildren<LegacyText>(true).ToList());
+            StatusOverlayTextCache[overlayId] = texts;
+        }
+
+        foreach (var text in texts.TmpTexts)
+        {
+            if (text != null)
+                TranslateCurrentComponent(text);
+        }
+        foreach (var text in texts.LegacyTexts)
+        {
+            if (text != null)
+                TranslateCurrentComponent(text);
+        }
     }
 
     private static void ScreenStatusTextPrefix(object[] __args)
@@ -896,7 +941,9 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 
             FirstToken = Regex.Unescape(words[0]);
             var pattern = string.Join(@"\s+", words);
-            if (Regex.IsMatch(key.Trim(), @"^[A-Za-z0-9]+$"))
+            if (ExactUiRoleKeys.Contains(key.Trim()))
+                pattern = $@"^\s*{pattern}\s*$";
+            else if (Regex.IsMatch(key.Trim(), @"^[A-Za-z0-9]+$"))
                 pattern = $@"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])";
             Pattern = new Regex(
                 pattern,
@@ -989,6 +1036,18 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 
         public float? TmpFontSize { get; }
         public int? LegacyFontSize { get; }
+    }
+
+    private sealed class StatusOverlayTexts
+    {
+        public StatusOverlayTexts(List<TMP_Text> tmpTexts, List<LegacyText> legacyTexts)
+        {
+            TmpTexts = tmpTexts;
+            LegacyTexts = legacyTexts;
+        }
+
+        public List<TMP_Text> TmpTexts { get; }
+        public List<LegacyText> LegacyTexts { get; }
     }
 
     private sealed class RefreshComponent : MonoBehaviour

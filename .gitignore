@@ -9,7 +9,7 @@
 !src/
 !src/HarmonyXLocalization/
 !src/HarmonyXLocalization/HarmonyXLocalization.csproj
-!src/HarmonyXLocalization/HarmonyXUnitIntroPlugin.cs
+!src/HarmonyXLocalization/HarmonyXLocalizationPlugin.cs
 !BepInEx/
 !BepInEx/config/
 !BepInEx/config/AutoTranslatorConfig.ini

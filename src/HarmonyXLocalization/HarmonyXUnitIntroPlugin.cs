@@ -20,7 +20,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.8.7";
+    public const string Version = "1.8.10";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -33,6 +33,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static readonly List<MappingEntry> Mappings = new();
     private static readonly Dictionary<int, TextState> AppliedStates = new();
     private static readonly Dictionary<int, FontLayoutState> ObjectiveFontStates = new();
+    private static readonly Dictionary<int, FontLayoutState> StatusOverlayFontStates = new();
     private static readonly Dictionary<int, string> LastProcessedTexts = new();
     // Setting TMP_Text.text from the fallback scanner re-enters the patched
     // setter.  Keep that write out of the translation pipeline; otherwise a
@@ -84,6 +85,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         "选择", "选择单位", "框选多个单位"
     };
     private const float ManualGuideImGuiFontScale = 1.6f;
+    private const float StatusOverlayFontScale = 1.4f;
     private static readonly HashSet<GUIStyle> ActiveManualGuideStyles = new();
 
     internal static readonly string Original =
@@ -121,7 +123,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         PatchScreenStatusWriters(harmony);
         PatchImGuiTextMethods(harmony);
         AddComponent<RefreshComponent>();
-        Log.LogInfo("HarmonyX localization patch loaded for TMP_Text, UnityEngine.UI.Text, and Unity IMGUI text; objective font layout and Alt+T toggle enabled.");
+        Log.LogInfo($"HarmonyX localization patch loaded for TMP_Text, UnityEngine.UI.Text, and Unity IMGUI text; status overlay font scale {StatusOverlayFontScale:0.0}x, objective font layout and Alt+T toggle enabled.");
     }
 
     private static void TmpTextPrefix(TMP_Text __instance, ref string value)
@@ -249,6 +251,9 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     {
         var prefix = new HarmonyMethod(typeof(HarmonyXUnitIntroPlugin), nameof(ScreenStatusTextPrefix));
         harmony.Patch(
+            AccessTools.Method(typeof(UIManager), nameof(UIManager.SetScreenStatus), new[] { typeof(Unit) }),
+            postfix: new HarmonyMethod(typeof(HarmonyXUnitIntroPlugin), nameof(UnitScreenStatusPostfix)));
+        harmony.Patch(
             AccessTools.Method(
                 typeof(UIManager),
                 nameof(UIManager.CheckAndStatusObject),
@@ -259,6 +264,20 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
                 }),
             prefix: prefix);
 
+        var setTextStatus = AccessTools.Method(
+            typeof(InventoryItemCrew),
+            nameof(InventoryItemCrew.SetTextStatus),
+            new[] { typeof(Color), typeof(string) });
+        if (setTextStatus != null)
+        {
+            harmony.Patch(setTextStatus, prefix: prefix);
+            Logger?.LogInfo("Patched InventoryItemCrew.SetTextStatus(Color, string) for status overlays.");
+        }
+        else
+        {
+            Logger?.LogWarning("Could not find InventoryItemCrew.SetTextStatus(Color, string).");
+        }
+
         foreach (var method in typeof(UIManager).GetMethods().Where(method =>
                      method.Name == nameof(UIManager.SetScreenOverlay) &&
                      method.GetParameters().Any(parameter => parameter.ParameterType == typeof(string))))
@@ -266,6 +285,25 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
             harmony.Patch(method, prefix: prefix);
         }
         Logger?.LogInfo("Patched UIManager status/overlay string entry points before native UI objects are created.");
+    }
+
+    private static void UnitScreenStatusPostfix(UIManager __instance, Unit __0)
+    {
+        if (!TranslationsEnabled || __instance == null || __0 == null)
+            return;
+
+        var overlays = __instance.unitsWithStatus;
+        if (overlays == null || !overlays.TryGetValue(__0, out var overlay) || overlay == null)
+            return;
+
+        // SetScreenStatus writes the combined world-space status block directly in
+        // native code, bypassing TMP_Text.text/SetText. Translate that exact text
+        // object immediately after the write, before Unity renders the frame.
+        var screenOverlay = overlay.GetComponent<ScreenOverlayUI>() ??
+                            overlay.GetComponentInChildren<ScreenOverlayUI>(true);
+        var statusText = screenOverlay?.statusText ?? overlay.GetComponentInChildren<TMP_Text>(true);
+        if (statusText != null)
+            TranslateCurrentComponent(statusText);
     }
 
     private static void ScreenStatusTextPrefix(object[] __args)
@@ -405,6 +443,11 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
             return;
         }
 
+        // SetTextStatus translates the producer argument before the native UI
+        // component receives it.  If the setter therefore sees the already
+        // translated value, still apply the status-overlay font layout here.
+        ApplyKnownStatusOverlayFontLayout(component, value);
+
         var source = value;
         if (AppliedStates.TryGetValue(instanceId, out var previous))
         {
@@ -511,6 +554,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
     private static string ApplyContextLayout(Component component, string source, string translated)
     {
         var plainSource = Regex.Replace(source, "<[^>]+>", string.Empty).Trim();
+        ApplyStatusOverlayFontLayout(component, source, translated);
         ApplyManualPauseFontLayout(component, plainSource);
         ApplyObjectiveFontLayout(component, plainSource);
         if (string.Equals(plainSource, "UI", StringComparison.OrdinalIgnoreCase))
@@ -537,6 +581,55 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
         }
 
         return turretFront ? translated + "<color=#00000000>F</color>" : translated;
+    }
+
+    private static void ApplyKnownStatusOverlayFontLayout(Component component, string value)
+    {
+        if (IsStatusOverlayLabel(value))
+            ApplyStatusOverlayFontLayout(component, value, value);
+    }
+
+    private static void ApplyStatusOverlayFontLayout(Component component, string source, string translated)
+    {
+        if (!IsStatusOverlayLabel(source) && !IsStatusOverlayLabel(translated))
+            return;
+
+        var instanceId = component.GetInstanceID();
+        if (component is TMP_Text tmp)
+        {
+            if (!StatusOverlayFontStates.TryGetValue(instanceId, out var state))
+            {
+                state = new FontLayoutState(tmp.fontSize, null);
+                StatusOverlayFontStates[instanceId] = state;
+            }
+            tmp.enableAutoSizing = false;
+            tmp.fontSize = Mathf.Max(10f, state.TmpFontSize!.Value * StatusOverlayFontScale);
+        }
+        else if (component is LegacyText legacy)
+        {
+            if (!StatusOverlayFontStates.TryGetValue(instanceId, out var state))
+            {
+                state = new FontLayoutState(null, legacy.fontSize);
+                StatusOverlayFontStates[instanceId] = state;
+            }
+            legacy.resizeTextForBestFit = false;
+            legacy.fontSize = Mathf.Max(10, Mathf.RoundToInt(state.LegacyFontSize!.Value * StatusOverlayFontScale));
+        }
+    }
+
+    private static bool IsStatusOverlayLabel(string value)
+    {
+        var plain = Regex.Replace(value, "<[^>]+>", string.Empty).Trim();
+        return plain.EndsWith(" BROKEN", StringComparison.OrdinalIgnoreCase) ||
+               plain.EndsWith(" DAMAGED", StringComparison.OrdinalIgnoreCase) ||
+               plain.EndsWith(" REDUCED", StringComparison.OrdinalIgnoreCase) ||
+               plain.StartsWith("INSUFFICIENT ", StringComparison.OrdinalIgnoreCase) ||
+               plain.StartsWith("LOW ", StringComparison.OrdinalIgnoreCase) ||
+               plain.EndsWith("损坏", StringComparison.Ordinal) ||
+               plain.EndsWith("受损", StringComparison.Ordinal) ||
+               plain.EndsWith("降低", StringComparison.Ordinal) ||
+               plain.StartsWith("发动机功率不足", StringComparison.Ordinal) ||
+               plain.StartsWith("发动机扭矩过低", StringComparison.Ordinal);
     }
 
     private static void ApplyManualPauseFontLayout(Component component, string plainSource)
@@ -837,6 +930,15 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
 
     private static void RestoreIfDisabled(int instanceId, Component component)
     {
+        if (StatusOverlayFontStates.TryGetValue(instanceId, out var statusFontState))
+        {
+            if (component is TMP_Text statusTmp && statusFontState.TmpFontSize.HasValue)
+                statusTmp.fontSize = statusFontState.TmpFontSize.Value;
+            else if (component is LegacyText statusLegacy && statusFontState.LegacyFontSize.HasValue)
+                statusLegacy.fontSize = statusFontState.LegacyFontSize.Value;
+            StatusOverlayFontStates.Remove(instanceId);
+        }
+
         if (ObjectiveFontStates.TryGetValue(instanceId, out var fontState))
         {
             if (component is TMP_Text tmpText && fontState.TmpFontSize.HasValue)
@@ -928,6 +1030,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
                         CandidateLogged = true;
                         Logger?.LogInfo($"Found TMP text containing Celeres (length {current.Length}).");
                     }
+                    ApplyKnownStatusOverlayFontLayout(text, current);
                     if (TryTranslate(current, out var translated))
                     {
                         translated = ApplyContextLayout(text, current, translated);
@@ -954,6 +1057,7 @@ public sealed class HarmonyXUnitIntroPlugin : BasePlugin
                         CandidateLogged = true;
                         Logger?.LogInfo($"Found legacy text containing SQUAD (length {current.Length}).");
                     }
+                    ApplyKnownStatusOverlayFontLayout(text, current);
                     if (TryTranslate(current, out var translated))
                     {
                         translated = ApplyContextLayout(text, current, translated);

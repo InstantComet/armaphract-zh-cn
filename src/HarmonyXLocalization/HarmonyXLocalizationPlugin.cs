@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.8.34";
+    public const string Version = "1.8.45";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -58,6 +58,18 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Regex RepairEtaRegex = new(
         @"^\s*repairs\s+complete\s+in\s+(\d+)\s+days?\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex NoAmmoForRegex = new(
+        @"^\s*NO\s+AMMO\s+FOR\s+(.+?)\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex MissingCrewRegex = new(
+        @"^\s*MISSING\s+CREW\s*:\s*(.+?)\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex LowEngineTorqueRegex = new(
+        @"^\s*(?:LOW|INSUFFICIENT)\s+ENGINE\s+TORQUE\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex RequiresRoleRegex = new(
+        @"^\s*REQUIRES\s+(.+?)\s+ROLE\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex ChineseCharacterRegex = new(
         @"[\u3400-\u9fff]",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -67,8 +79,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly HashSet<string> ExactUiOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "COMMAND", "DRIVER", "GUNNER", "LOADER",
-        "HIGH", "FAIR", "MEDIUM", "LOW", "WEAK", "FALLING",
-        "STUNNED", "ROUTED", "BLEEDOUT"
+        "FAIR", "MEDIUM", "LOW", "WEAK", "FALLING",
+        "STUNNED", "LIGHT"
     };
     private static readonly HashSet<string> CaseSensitiveKeys = new(StringComparer.Ordinal)
     {
@@ -78,7 +90,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         // Dynamic module statuses are emitted in uppercase. Keep this suffix
         // fallback case-sensitive so normal prose such as "broken mirror" is
         // handled only by its complete sentence mapping.
-        "BROKEN"
+        "BROKEN", "DAMAGED", "FAILURE", "HIGH", "UNSAFE", "ROUTED", "BLEEDOUT",
+        "ASSAULT SQUAD", "MED",
+        "TYPE", "INTERCEPTOR", "COOLDOWN", "RANGE", "USES", "ANGLE",
+        "INFANTRY REPLENISHMENT SECTION", "MEDICAL MATERIALS", "REPAIR MATERIALS",
+        "REACTIVE", "APPLIQUE", "PROTECTION", "ENGINE POWER", "ACCELERATION",
+        "TORQUE", "TURRET TRAVERSE"
     };
     private static DateTime MappingTimestampUtc;
     private static DateTime NextMappingCheckUtc;
@@ -87,6 +104,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static bool TranslationsEnabled = true;
     private static bool PanelActivationTranslationInProgress;
     private static bool SceneScanRequested;
+    private static int PendingActivationScanFrames;
     private static readonly HashSet<string> ObjectiveTitles = new(StringComparer.OrdinalIgnoreCase)
     {
         "Exit", "Extract", "default objective", "intercept Convoy", "Exit region",
@@ -248,6 +266,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static void SceneLoadedPostfix()
     {
         SceneScanRequested = true;
+        PendingActivationScanFrames = 8;
         Logger?.LogInfo($"Scene loaded: {SceneManager.GetActiveScene().name}");
     }
 
@@ -270,6 +289,10 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         {
             PanelActivationTranslationInProgress = false;
         }
+        // Several briefing panels populate their labels after SetActive returns.
+        // Scan a bounded number of following frames so those late writes are
+        // translated automatically instead of requiring an Alt+T round trip.
+        PendingActivationScanFrames = System.Math.Max(PendingActivationScanFrames, 8);
     }
 
     private static void TranslateCurrentComponent(Component component)
@@ -1131,6 +1154,39 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static bool TryTranslate(string value, out string translated)
     {
         ReloadMappingsIfChanged();
+        var lowEngineTorque = LowEngineTorqueRegex.Match(value);
+        if (lowEngineTorque.Success)
+        {
+            translated = $"发动机扭矩过低：{lowEngineTorque.Groups[1].Value}";
+            return true;
+        }
+        var requiresRole = RequiresRoleRegex.Match(value);
+        if (requiresRole.Success)
+        {
+            var role = requiresRole.Groups[1].Value.Trim();
+            if (!TryTranslate(role, out var translatedRole))
+                translatedRole = role;
+            translated = $"需要{translatedRole}职务";
+            return true;
+        }
+        var noAmmoFor = NoAmmoForRegex.Match(value);
+        if (noAmmoFor.Success)
+        {
+            var weapon = noAmmoFor.Groups[1].Value.Trim();
+            if (!TryTranslate(weapon, out var translatedWeapon))
+                translatedWeapon = weapon;
+            translated = $"{translatedWeapon}无弹药";
+            return true;
+        }
+        var missingCrew = MissingCrewRegex.Match(value);
+        if (missingCrew.Success)
+        {
+            var role = missingCrew.Groups[1].Value.Trim();
+            if (!TryTranslate(role, out var translatedRole))
+                translatedRole = role;
+            translated = $"缺少乘员：{translatedRole}";
+            return true;
+        }
         var repairEta = RepairEtaRegex.Match(value);
         if (repairEta.Success)
         {
@@ -1470,9 +1526,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                 if (TranslationsEnabled && (IsCampaignScene() || IsMainMenuScene()))
                     EnforceCampaignPanelTitleLayouts();
                 // A one-shot pass handles serialized scene text and explicit Alt+T
-                // toggles. Dynamic text must be translated at its producer; periodic
-                // polling would make direct-field writers alternate languages.
-                if (!firstPass && !toggled && !SceneScanRequested)
+                // toggles. A short bounded scan window after panel activation catches
+                // briefing labels written a few frames after SetActive returns.
+                var delayedActivationScan = PendingActivationScanFrames > 0;
+                if (delayedActivationScan)
+                    PendingActivationScanFrames--;
+                if (!firstPass && !toggled && !SceneScanRequested && !delayedActivationScan)
                     continue;
                 firstPass = false;
                 SceneScanRequested = false;

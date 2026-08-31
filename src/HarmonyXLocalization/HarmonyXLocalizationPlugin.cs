@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.1";
+    public const string Version = "1.9.2";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -82,6 +82,15 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex LongEnglishRunRegex = new(
         @"(?:[A-Za-z]+\s+){4,}[A-Za-z]+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ContractCoordinateRegex = new(
+        @"\(\s*\d+\s*,\s*\d+\s*\)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ContractHighValueRegex = new(
+        @"(?<![A-Za-z])HIGH(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ContractExtremeValueRegex = new(
+        @"(?<![A-Za-z])EXTREME(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly HashSet<string> ExactUiOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -159,6 +168,10 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         "COMPANY", "OPS", "SYSTEMS", "OPPOSITION FORCES",
         "DISTRICT / ENVIRON DATA", "DISTRICT/ENVIRON DATA",
         "AVAILABLE CONTRACTS", "DISTRICT INFO", "LOCATION DATA", "ORDERS",
+        // The crew/character panel uses the same title-style layout for the
+        // character name.  The Chinese name is wider and otherwise clips in
+        // the blue name bar.
+        "Aspera", "阿斯佩拉",
         // GUI.Label/Button can translate the GUIContent before the nested
         // GUIStyle.Draw hook sees it, so recognize the final labels as well.
         "佣兵团", "运营", "系统", "敌对部队", "地区 / 环境数据", "地区/环境数据",
@@ -181,6 +194,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private const float StatusOverlayFontScale = 1.4f;
     private const float CampaignPanelTitleFontScale = 0.72f;
     private const float CampaignPanelTitleDownShiftScale = 0.07f;
+    private const string AsperaNameVerticalOffsetTag = "<voffset=-7px>";
+    private const string ContractTitleVerticalOffsetTag = "<voffset=-5px>";
+    private const string ContractDetailLabelLineHeightTag = "<line-height=90%>";
     private const string MainMenuSceneName = "menu";
     private static readonly HashSet<GUIStyle> ActiveManualGuideStyles = new();
 
@@ -774,6 +790,81 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                (IsMainMenuScene() && MainMenuPanelTitles.Contains(plain));
     }
 
+    private static bool IsContractTitleLayoutTarget(Component component, string text)
+    {
+        var plain = PlainText(text);
+        return IsCampaignScene() &&
+               component.name.Equals("title", StringComparison.OrdinalIgnoreCase) &&
+               (plain.Equals("CONTRACT", StringComparison.OrdinalIgnoreCase) ||
+                plain.Equals("合约", StringComparison.Ordinal));
+    }
+
+    private static bool TryGetCompactTitleVerticalOffsetTag(
+        Component component,
+        string text,
+        out string offsetTag)
+    {
+        var plain = PlainText(text);
+        var isAsperaName = component.name.Equals("asperaName", StringComparison.OrdinalIgnoreCase) &&
+                           (plain.Equals("Aspera", StringComparison.OrdinalIgnoreCase) ||
+                            plain.Equals("阿斯佩拉", StringComparison.Ordinal));
+        if (isAsperaName)
+        {
+            offsetTag = AsperaNameVerticalOffsetTag;
+            return true;
+        }
+
+        var isContractTitle = IsContractTitleLayoutTarget(component, plain);
+        if (isContractTitle)
+        {
+            offsetTag = ContractTitleVerticalOffsetTag;
+            return true;
+        }
+
+        offsetTag = string.Empty;
+        return false;
+    }
+
+    private static string ApplyCompactTitleVerticalOffset(string value, string offsetTag)
+    {
+        return value.Contains("<voffset", StringComparison.OrdinalIgnoreCase)
+            ? value
+            : $"{offsetTag}{value}</voffset>";
+    }
+
+    private static bool IsContractDetailLabelText(string text)
+    {
+        var plain = PlainText(text);
+        var englishLabels = plain.Contains("REGION", StringComparison.OrdinalIgnoreCase) &&
+                            plain.Contains("PAY %", StringComparison.OrdinalIgnoreCase) &&
+                            plain.Contains("AREA", StringComparison.OrdinalIgnoreCase) &&
+                            plain.Contains("TIME", StringComparison.OrdinalIgnoreCase) &&
+                            plain.Contains("DANGER", StringComparison.OrdinalIgnoreCase);
+        var chineseLabels = plain.Contains("区域", StringComparison.Ordinal) &&
+                            plain.Contains("报酬", StringComparison.Ordinal) &&
+                            plain.Contains("地区", StringComparison.Ordinal) &&
+                            plain.Contains("时间", StringComparison.Ordinal) &&
+                            plain.Contains("危险度", StringComparison.Ordinal);
+        return IsCampaignScene() && plain.Contains('\n') && (englishLabels || chineseLabels);
+    }
+
+    private static string ApplyContractDetailLabelLineHeight(string value)
+    {
+        return value.Contains("<line-height", StringComparison.OrdinalIgnoreCase)
+            ? value
+            : $"{ContractDetailLabelLineHeightTag}{value}</line-height>";
+    }
+
+    private static string ApplyContractDangerValueTranslation(string value)
+    {
+        var plain = PlainText(value);
+        if (!IsCampaignScene() || !plain.Contains('\n') || !ContractCoordinateRegex.IsMatch(plain))
+            return value;
+
+        var translated = ContractHighValueRegex.Replace(value, "高");
+        return ContractExtremeValueRegex.Replace(translated, "极高");
+    }
+
     private static bool IsMainMenuScene()
     {
         return ActiveSceneName.Equals("0StartView", StringComparison.OrdinalIgnoreCase);
@@ -894,6 +985,13 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         }
         else if (TryTranslate(source, out var mapped))
             translated = ApplyContextLayout(component, source, mapped);
+        else if (component is TMP_Text &&
+                 TryGetCompactTitleVerticalOffsetTag(component, source, out var offsetTag))
+            translated = ApplyCompactTitleVerticalOffset(source, offsetTag);
+
+        translated = ApplyContractDangerValueTranslation(translated);
+        if (component is TMP_Text && IsContractDetailLabelText(source))
+            translated = ApplyContractDetailLabelLineHeight(translated);
 
         translated = AppendMainMenuVersionCredit(translated);
         return !string.Equals(source, translated, StringComparison.Ordinal);
@@ -993,6 +1091,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ApplyManualPauseFontLayout(component, plainSource);
         ApplyObjectiveFontLayout(component, plainSource);
         ApplyCampaignPanelTitleLayout(component, plainSource);
+        if (component is TMP_Text &&
+            TryGetCompactTitleVerticalOffsetTag(component, plainSource, out var offsetTag))
+            return ApplyCompactTitleVerticalOffset(translated, offsetTag);
         if (string.Equals(plainSource, "UI", StringComparison.OrdinalIgnoreCase))
         {
             var soundUi = IsSoundSettingsUi(component, out var uiPath, out var uiY);
@@ -1134,7 +1235,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static void ApplyCampaignPanelTitleLayout(Component component, string plainSource)
     {
-        if (!IsPanelTitleLayoutTarget(plainSource))
+        if (!IsPanelTitleLayoutTarget(plainSource) &&
+            !IsContractTitleLayoutTarget(component, plainSource))
             return;
 
         var instanceId = component.GetInstanceID();

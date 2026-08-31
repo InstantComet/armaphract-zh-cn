@@ -1,16 +1,16 @@
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
-using BepInEx.Unity.IL2CPP.Utils.Collections;
 using HarmonyLib;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UIElements;
 using LegacyText = UnityEngine.UI.Text;
 
 namespace Armaphract.HarmonyXLocalization;
@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.8.45";
+    public const string Version = "1.9.1";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -31,12 +31,15 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         "Text",
         "armaphract_zh-CN.txt");
     private static readonly List<MappingEntry> Mappings = new();
+    private static readonly Dictionary<string, string> ExactMappingsOrdinal = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> ExactMappingsIgnoreCase = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, TextState> AppliedStates = new();
     private static readonly Dictionary<int, FontLayoutState> ObjectiveFontStates = new();
     private static readonly Dictionary<int, FontLayoutState> StatusOverlayFontStates = new();
     private static readonly Dictionary<int, PanelTitleLayoutState> PanelTitleLayoutStates = new();
     private static readonly Dictionary<int, Component> PanelTitleComponents = new();
     private static readonly Dictionary<int, StatusOverlayTexts> StatusOverlayTextCache = new();
+    private static readonly Queue<int> StatusOverlayTextCacheOrder = new();
     private static readonly Dictionary<int, string> LastProcessedTexts = new();
     // Setting TMP_Text.text from the fallback scanner re-enters the patched
     // setter.  Keep that write out of the translation pipeline; otherwise a
@@ -44,6 +47,10 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     // between the source and a partially translated value.
     private static readonly HashSet<int> InternalTextWrites = new();
     private static readonly Dictionary<string, string> TranslationCache = new(StringComparer.Ordinal);
+    private static readonly Queue<string> TranslationCacheOrder = new();
+    private static readonly Dictionary<int, PendingPanelScan> PendingPanelScans = new();
+    private static readonly List<int> PendingPanelScanIds = new();
+    private static readonly List<int> PanelTitleComponentIds = new();
     private static readonly HashSet<int> FrontLayoutLoggedIds = new();
     private static readonly HashSet<int> UiContextLoggedIds = new();
     private static readonly HashSet<int> ExitContextLoggedIds = new();
@@ -97,6 +104,17 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         "REACTIVE", "APPLIQUE", "PROTECTION", "ENGINE POWER", "ACCELERATION",
         "TORQUE", "TURRET TRAVERSE"
     };
+    private static readonly Dictionary<string, string> ModuleStatLabels = new(StringComparer.Ordinal)
+    {
+        ["ENGINEPOWER"] = "发动机功率",
+        ["TURNSPEED"] = "转向速度",
+        ["REVERSEGEAR"] = "倒车挡",
+        ["ACCELERATION"] = "加速度",
+        ["TORQUE"] = "扭矩",
+        ["TURRETTRAV"] = "炮塔转速",
+        ["TURRETTRAVERSE"] = "炮塔转速",
+        ["炮塔转速ERSE"] = "炮塔转速"
+    };
     private static DateTime MappingTimestampUtc;
     private static DateTime NextMappingCheckUtc;
     private static bool MappingsLoaded;
@@ -104,7 +122,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static bool TranslationsEnabled = true;
     private static bool PanelActivationTranslationInProgress;
     private static bool SceneScanRequested;
-    private static int PendingActivationScanFrames;
+    private static int PendingGlobalScanFrames;
+    private static float NextPanelTitleLayoutEnforceTime;
+    private static string ActiveSceneName = string.Empty;
+    private const int DelayedPanelScanFrames = 8;
+    private const int TranslationCacheCapacity = 8192;
+    private const float PanelTitleLayoutEnforceInterval = 0.25f;
     private static readonly HashSet<string> ObjectiveTitles = new(StringComparer.OrdinalIgnoreCase)
     {
         "Exit", "Extract", "default objective", "intercept Convoy", "Exit region",
@@ -181,6 +204,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     public override void Load()
     {
         Logger = Log;
+        ActiveSceneName = SceneManager.GetActiveScene().name;
         ReloadMappingsIfChanged(force: true);
         var harmony = new Harmony(Guid);
         harmony.Patch(
@@ -197,6 +221,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         PatchSceneLoaded(harmony);
         PatchUnitStatusWriters(harmony);
         PatchScreenStatusWriters(harmony);
+        PatchUiToolkitTextWriters(harmony);
         PatchImGuiTextMethods(harmony);
         AddComponent<RefreshComponent>();
         Log.LogInfo($"HarmonyX localization patch loaded for TMP_Text, UnityEngine.UI.Text, and Unity IMGUI text; status overlay font scale {StatusOverlayFontScale:0.0}x, objective font layout and Alt+T toggle enabled.");
@@ -265,9 +290,11 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static void SceneLoadedPostfix()
     {
+        ActiveSceneName = SceneManager.GetActiveScene().name;
+        ClearSceneState();
         SceneScanRequested = true;
-        PendingActivationScanFrames = 8;
-        Logger?.LogInfo($"Scene loaded: {SceneManager.GetActiveScene().name}");
+        PendingGlobalScanFrames = 2;
+        Logger?.LogInfo($"Scene loaded: {ActiveSceneName}");
     }
 
     private static void GameObjectSetActivePostfix(GameObject __instance, bool __0)
@@ -276,23 +303,65 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             __instance == null || !__instance.activeInHierarchy)
             return;
         PanelActivationTranslationInProgress = true;
+        var hasText = false;
         try
         {
-            foreach (var text in __instance.GetComponentsInChildren<TMP_Text>(true))
-                TranslateCurrentComponent(text);
-            foreach (var text in __instance.GetComponentsInChildren<LegacyText>(true))
-                TranslateCurrentComponent(text);
-            foreach (var text in __instance.GetComponentsInChildren<TextMesh>(true))
-                TranslateCurrentComponent(text);
+            hasText = TranslateHierarchy(__instance);
         }
         finally
         {
             PanelActivationTranslationInProgress = false;
         }
-        // Several briefing panels populate their labels after SetActive returns.
-        // Scan a bounded number of following frames so those late writes are
-        // translated automatically instead of requiring an Alt+T round trip.
-        PendingActivationScanFrames = System.Math.Max(PendingActivationScanFrames, 8);
+        if (hasText)
+        {
+            var instanceId = __instance.GetInstanceID();
+            PendingPanelScans[instanceId] = new PendingPanelScan(__instance, DelayedPanelScanFrames);
+        }
+    }
+
+    private static bool TranslateHierarchy(GameObject root)
+    {
+        var hasText = false;
+        foreach (var text in root.GetComponentsInChildren<TMP_Text>(true))
+        {
+            hasText = true;
+            TranslateCurrentComponent(text);
+        }
+        foreach (var text in root.GetComponentsInChildren<LegacyText>(true))
+        {
+            hasText = true;
+            TranslateCurrentComponent(text);
+        }
+        foreach (var text in root.GetComponentsInChildren<TextMesh>(true))
+        {
+            hasText = true;
+            TranslateCurrentComponent(text);
+        }
+        return hasText;
+    }
+
+    private static void ClearSceneState()
+    {
+        AppliedStates.Clear();
+        ObjectiveFontStates.Clear();
+        StatusOverlayFontStates.Clear();
+        PanelTitleLayoutStates.Clear();
+        PanelTitleComponents.Clear();
+        StatusOverlayTextCache.Clear();
+        StatusOverlayTextCacheOrder.Clear();
+        LastProcessedTexts.Clear();
+        InternalTextWrites.Clear();
+        PendingPanelScans.Clear();
+        PendingPanelScanIds.Clear();
+        PanelTitleComponentIds.Clear();
+        FrontLayoutLoggedIds.Clear();
+        UiContextLoggedIds.Clear();
+        ExitContextLoggedIds.Clear();
+        PanelTitleContextLoggedIds.Clear();
+        ImGuiCandidatesLogged.Clear();
+        ImGuiPanelTitlesLogged.Clear();
+        FragmentedTranslationsLogged.Clear();
+        CandidateLogged = false;
     }
 
     private static void TranslateCurrentComponent(Component component)
@@ -305,10 +374,20 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             _ => string.Empty
         };
         var instanceId = component.GetInstanceID();
+        if (!TranslationsEnabled)
+        {
+            RestoreIfDisabled(instanceId, component);
+            return;
+        }
+        if (string.IsNullOrEmpty(current))
+            return;
+        ApplyKnownStatusOverlayFontLayout(component, current);
+        ApplyKnownCampaignPanelTitleLayout(component, current);
         if (LastProcessedTexts.TryGetValue(instanceId, out var last) &&
             string.Equals(current, last, StringComparison.Ordinal))
             return;
-        if (string.IsNullOrEmpty(current) || !TryTranslateForDisplay(component, current, out var translated))
+        LastProcessedTexts[instanceId] = current;
+        if (!TryTranslateForDisplay(component, current, out var translated))
             return;
         SetComponentText(component, current, translated);
     }
@@ -383,6 +462,35 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         Logger?.LogInfo("Patched UIManager status/overlay string entry points before native UI objects are created.");
     }
 
+    private static void PatchUiToolkitTextWriters(Harmony harmony)
+    {
+        var patched = 0;
+        var textSetter = AccessTools.PropertySetter(typeof(TextElement), nameof(TextElement.text));
+        if (textSetter != null)
+        {
+            harmony.Patch(
+                textSetter,
+                prefix: new HarmonyMethod(typeof(HarmonyXLocalizationPlugin), nameof(UiToolkitTextPrefix)));
+            patched++;
+        }
+
+        var labelConstructor = AccessTools.Constructor(typeof(Label), new[] { typeof(string) });
+        if (labelConstructor != null)
+        {
+            harmony.Patch(
+                labelConstructor,
+                prefix: new HarmonyMethod(typeof(HarmonyXLocalizationPlugin), nameof(UiToolkitTextPrefix)));
+            patched++;
+        }
+        Logger?.LogInfo($"Patched {patched} UI Toolkit text writers.");
+    }
+
+    private static void UiToolkitTextPrefix(ref string __0)
+    {
+        if (TranslationsEnabled && !string.IsNullOrEmpty(__0) && TryTranslate(__0, out var translated))
+            __0 = translated;
+    }
+
     private static void UnitScreenStatusPostfix(UIManager __instance, Unit __0)
     {
         if (!TranslationsEnabled || __instance == null || __0 == null)
@@ -415,12 +523,13 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         var overlayId = overlay.GetInstanceID();
         if (!StatusOverlayTextCache.TryGetValue(overlayId, out var texts))
         {
-            if (StatusOverlayTextCache.Count >= 128)
-                StatusOverlayTextCache.Clear();
+            while (StatusOverlayTextCache.Count >= 128 && StatusOverlayTextCacheOrder.Count > 0)
+                StatusOverlayTextCache.Remove(StatusOverlayTextCacheOrder.Dequeue());
             texts = new StatusOverlayTexts(
                 overlay.GetComponentsInChildren<TMP_Text>(true).ToList(),
                 overlay.GetComponentsInChildren<LegacyText>(true).ToList());
             StatusOverlayTextCache[overlayId] = texts;
+            StatusOverlayTextCacheOrder.Enqueue(overlayId);
         }
 
         foreach (var text in texts.TmpTexts)
@@ -603,7 +712,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             // IMGUI uses screen coordinates, where positive Y moves content down.
             style.contentOffset = state.ContentOffset +
                                   Vector2.up * originalFontSize * CampaignPanelTitleDownShiftScale;
-            var plain = HtmlTagRegex.Replace(translated, string.Empty).Trim();
+            var plain = PlainText(translated);
             if (ImGuiPanelTitlesLogged.Add(plain))
                 Logger?.LogInfo($"IMGUI campaign title layout: text={plain}, font={originalFontSize}->{style.fontSize}");
         }
@@ -624,7 +733,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static bool IsManualGuideLabel(string text)
     {
-        var plain = HtmlTagRegex.Replace(text, string.Empty).Trim();
+        var plain = PlainText(text);
         plain = plain.TrimEnd(':', '：').Trim();
         return ManualGuideLabels.Contains(plain);
     }
@@ -639,7 +748,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         {
             Logger?.LogInfo($"IMGUI text candidate: {text.Replace("\n", "\\n", StringComparison.Ordinal)}");
         }
-        var plain = HtmlTagRegex.Replace(text, string.Empty).Trim();
+        var plain = PlainText(text);
         if (IsCampaignScene() && plain.Equals("Exit", StringComparison.OrdinalIgnoreCase))
             text = "退出";
         else if (TryTranslate(text, out var translated))
@@ -649,25 +758,32 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static bool IsCampaignScene()
     {
-        return SceneManager.GetActiveScene().name.Contains("Campaign", StringComparison.OrdinalIgnoreCase);
+        return ActiveSceneName.Contains("Campaign", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsCampaignPanelTitle(string text)
     {
-        var plain = HtmlTagRegex.Replace(text, string.Empty).Trim();
+        var plain = PlainText(text);
         return CampaignPanelTitles.Contains(plain);
     }
 
     private static bool IsPanelTitleLayoutTarget(string text)
     {
-        var plain = HtmlTagRegex.Replace(text, string.Empty).Trim();
+        var plain = PlainText(text);
         return (IsCampaignScene() && CampaignPanelTitles.Contains(plain)) ||
                (IsMainMenuScene() && MainMenuPanelTitles.Contains(plain));
     }
 
     private static bool IsMainMenuScene()
     {
-        return SceneManager.GetActiveScene().name.Equals("0StartView", StringComparison.OrdinalIgnoreCase);
+        return ActiveSceneName.Equals("0StartView", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string PlainText(string value)
+    {
+        return value.IndexOf('<') >= 0
+            ? HtmlTagRegex.Replace(value, string.Empty).Trim()
+            : value.Trim();
     }
 
     private static void TextPrefix(Component component, ref string value)
@@ -763,7 +879,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static bool TryTranslateForDisplay(Component component, string source, out string translated)
     {
         translated = source;
-        var plainSource = HtmlTagRegex.Replace(source, string.Empty).Trim();
+        var plainSource = PlainText(source);
         if (plainSource.Equals("Exit", StringComparison.OrdinalIgnoreCase) && IsCampaignScene())
         {
             translated = "退出";
@@ -817,7 +933,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static string AppendMainMenuVersionCredit(string value)
     {
-        if (!string.Equals(SceneManager.GetActiveScene().name, MainMenuSceneName, StringComparison.OrdinalIgnoreCase) ||
+        if (!string.Equals(ActiveSceneName, MainMenuSceneName, StringComparison.OrdinalIgnoreCase) ||
             value.Contains("InstantComet", StringComparison.OrdinalIgnoreCase))
             return value;
 
@@ -872,7 +988,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static string ApplyContextLayout(Component component, string source, string translated)
     {
-        var plainSource = HtmlTagRegex.Replace(source, string.Empty).Trim();
+        var plainSource = PlainText(source);
         ApplyStatusOverlayFontLayout(component, source, translated);
         ApplyManualPauseFontLayout(component, plainSource);
         ApplyObjectiveFontLayout(component, plainSource);
@@ -911,7 +1027,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static void ApplyKnownCampaignPanelTitleLayout(Component component, string value)
     {
-        ApplyCampaignPanelTitleLayout(component, HtmlTagRegex.Replace(value, string.Empty).Trim());
+        ApplyCampaignPanelTitleLayout(component, PlainText(value));
     }
 
     private static void ApplyStatusOverlayFontLayout(Component component, string source, string translated)
@@ -944,7 +1060,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static bool IsStatusOverlayLabel(string value)
     {
-        var plain = HtmlTagRegex.Replace(value, string.Empty).Trim();
+        var plain = PlainText(value);
         return plain.EndsWith(" BROKEN", StringComparison.OrdinalIgnoreCase) ||
                plain.EndsWith(" DAMAGED", StringComparison.OrdinalIgnoreCase) ||
                plain.EndsWith(" REDUCED", StringComparison.OrdinalIgnoreCase) ||
@@ -1153,11 +1269,29 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static bool TryTranslate(string value, out string translated)
     {
-        ReloadMappingsIfChanged();
+        if (TranslationCache.TryGetValue(value, out var cached))
+        {
+            translated = cached;
+            return !string.Equals(value, cached, StringComparison.Ordinal);
+        }
+        if (TryTranslateModuleStatLabel(value, out translated))
+        {
+            CacheTranslation(value, translated);
+            return true;
+        }
+        if (ExactMappingsOrdinal.TryGetValue(value, out var exact) ||
+            ExactMappingsIgnoreCase.TryGetValue(value, out exact))
+        {
+            translated = exact;
+            CacheTranslation(value, translated);
+            return !string.Equals(value, translated, StringComparison.Ordinal);
+        }
+
         var lowEngineTorque = LowEngineTorqueRegex.Match(value);
         if (lowEngineTorque.Success)
         {
             translated = $"发动机扭矩过低：{lowEngineTorque.Groups[1].Value}";
+            CacheTranslation(value, translated);
             return true;
         }
         var requiresRole = RequiresRoleRegex.Match(value);
@@ -1167,6 +1301,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             if (!TryTranslate(role, out var translatedRole))
                 translatedRole = role;
             translated = $"需要{translatedRole}职务";
+            CacheTranslation(value, translated);
             return true;
         }
         var noAmmoFor = NoAmmoForRegex.Match(value);
@@ -1176,6 +1311,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             if (!TryTranslate(weapon, out var translatedWeapon))
                 translatedWeapon = weapon;
             translated = $"{translatedWeapon}无弹药";
+            CacheTranslation(value, translated);
             return true;
         }
         var missingCrew = MissingCrewRegex.Match(value);
@@ -1185,18 +1321,22 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             if (!TryTranslate(role, out var translatedRole))
                 translatedRole = role;
             translated = $"缺少乘员：{translatedRole}";
+            CacheTranslation(value, translated);
             return true;
         }
         var repairEta = RepairEtaRegex.Match(value);
         if (repairEta.Success)
         {
             translated = $"维修将在 {repairEta.Groups[1].Value} 天后完成";
+            CacheTranslation(value, translated);
             return true;
         }
-        if (TranslationCache.TryGetValue(value, out var cached))
+
+        if (!ContainsVisibleLatinLetter(value))
         {
-            translated = cached;
-            return !string.Equals(value, cached, StringComparison.Ordinal);
+            translated = value;
+            CacheTranslation(value, value);
+            return false;
         }
 
         var result = value;
@@ -1207,9 +1347,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                 continue;
             result = ReplaceSegment(result, mapping, ref changed);
         }
-        if (TranslationCache.Count >= 8192)
-            TranslationCache.Clear();
-        TranslationCache[value] = result;
+        CacheTranslation(value, result);
         if (changed && ChineseCharacterRegex.IsMatch(result) && LongEnglishRunRegex.IsMatch(result) &&
             FragmentedTranslationsLogged.Add(value))
         {
@@ -1218,6 +1356,55 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         }
         translated = result;
         return changed;
+    }
+
+    private static bool TryTranslateModuleStatLabel(string value, out string translated)
+    {
+        var plain = PlainText(value);
+        var normalized = new StringBuilder(plain.Length);
+        foreach (var character in plain)
+        {
+            if (char.IsLetter(character))
+                normalized.Append(char.ToUpperInvariant(character));
+        }
+        return ModuleStatLabels.TryGetValue(normalized.ToString(), out translated!);
+    }
+
+    private static bool ContainsVisibleLatinLetter(string value)
+    {
+        var insideTag = false;
+        foreach (var character in value)
+        {
+            if (character == '<')
+            {
+                insideTag = true;
+                continue;
+            }
+            if (character == '>')
+            {
+                insideTag = false;
+                continue;
+            }
+            if (insideTag)
+                continue;
+            if ((character >= 'A' && character <= 'Z') ||
+                (character >= 'a' && character <= 'z'))
+                return true;
+        }
+        return false;
+    }
+
+    private static void CacheTranslation(string source, string result)
+    {
+        if (TranslationCache.ContainsKey(source))
+        {
+            TranslationCache[source] = result;
+            return;
+        }
+        while (TranslationCache.Count >= TranslationCacheCapacity && TranslationCacheOrder.Count > 0)
+            TranslationCache.Remove(TranslationCacheOrder.Dequeue());
+        TranslationCache[source] = result;
+        TranslationCacheOrder.Enqueue(source);
     }
 
     private static void ReloadMappingsIfChanged(bool force = false)
@@ -1240,12 +1427,15 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         if (MappingsLoaded && timestamp == MappingTimestampUtc)
             return;
 
-        var next = new List<MappingEntry>();
+        var rawMappings = new Dictionary<string, RawMapping>(StringComparer.Ordinal);
+        var duplicateCount = 0;
+        var conflictingDuplicateCount = 0;
+        var order = 0;
         if (File.Exists(MappingPath))
         {
             try
             {
-                foreach (var rawLine in File.ReadAllLines(MappingPath, new System.Text.UTF8Encoding(false)))
+                foreach (var rawLine in File.ReadLines(MappingPath, new System.Text.UTF8Encoding(false)))
                 {
                     var line = rawLine.Trim();
                     if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
@@ -1256,7 +1446,15 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                     var original = Unescape(line[..separator]);
                     var translation = Unescape(line[(separator + 1)..]);
                     if (original.Length > 0)
-                        next.Add(new MappingEntry(original, translation));
+                    {
+                        if (rawMappings.TryGetValue(original, out var previous))
+                        {
+                            duplicateCount++;
+                            if (!string.Equals(previous.Value, translation, StringComparison.Ordinal))
+                                conflictingDuplicateCount++;
+                        }
+                        rawMappings[original] = new RawMapping(original, translation, order++);
+                    }
                 }
             }
             catch (System.Exception ex)
@@ -1271,24 +1469,46 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             }
         }
 
-        if (next.Count == 0)
+        if (rawMappings.Count == 0)
         {
-            next.Add(new MappingEntry(FirstOriginal, FirstTranslation));
-            next.Add(new MappingEntry(FirstOriginal.Replace("  ", " ", StringComparison.Ordinal), FirstTranslation));
-            next.Add(new MappingEntry(SecondOriginal, SecondTranslation));
+            rawMappings[FirstOriginal] = new RawMapping(FirstOriginal, FirstTranslation, order++);
+            var normalizedFirst = FirstOriginal.Replace("  ", " ", StringComparison.Ordinal);
+            rawMappings[normalizedFirst] = new RawMapping(normalizedFirst, FirstTranslation, order++);
+            rawMappings[SecondOriginal] = new RawMapping(SecondOriginal, SecondTranslation, order++);
         }
 
+        var next = new List<MappingEntry>(rawMappings.Count);
+        var nextExactOrdinal = new Dictionary<string, string>(StringComparer.Ordinal);
+        var nextExactIgnoreCase = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in rawMappings.Values.OrderBy(item => item.Order))
+        {
+            next.Add(new MappingEntry(raw.Key, raw.Value));
+            if (CaseSensitiveKeys.Contains(raw.Key.Trim()))
+                nextExactOrdinal[raw.Key] = raw.Value;
+            else
+                nextExactIgnoreCase[raw.Key] = raw.Value;
+        }
         next.Sort((left, right) => right.Key.Length.CompareTo(left.Key.Length));
         Mappings.Clear();
         Mappings.AddRange(next);
+        ExactMappingsOrdinal.Clear();
+        foreach (var pair in nextExactOrdinal)
+            ExactMappingsOrdinal[pair.Key] = pair.Value;
+        ExactMappingsIgnoreCase.Clear();
+        foreach (var pair in nextExactIgnoreCase)
+            ExactMappingsIgnoreCase[pair.Key] = pair.Value;
         TranslationCache.Clear();
+        TranslationCacheOrder.Clear();
         // Existing controls may still contain unchanged English text that was
         // cached before a newly added mapping existed. Revisit them once after
         // a mapping reload so hot-added translations appear without Alt+T.
         LastProcessedTexts.Clear();
+        SceneScanRequested = true;
         MappingTimestampUtc = timestamp;
         MappingsLoaded = true;
-        Logger?.LogInfo($"Loaded {Mappings.Count} localization mappings from {MappingPath}.");
+        Logger?.LogInfo(
+            $"Loaded {Mappings.Count} unique localization mappings from {MappingPath} " +
+            $"({duplicateCount} duplicate rows ignored, {conflictingDuplicateCount} conflicting rows resolved by last entry).");
     }
 
     private static string Unescape(string value)
@@ -1334,36 +1554,63 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private sealed class MappingEntry
     {
+        private readonly string _patternSource;
+        private readonly RegexOptions _options;
+        private Regex? _pattern;
+
         public MappingEntry(string key, string value)
         {
             Key = key;
             Value = value;
-            var words = Regex.Split(key.Trim(), @"\s+")
-                .Where(word => word.Length > 0)
-                .Select(Regex.Escape)
-                .ToArray();
+            var trimmedKey = key.Trim();
+            var rawWords = trimmedKey.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            var words = rawWords.Select(Regex.Escape).ToArray();
             if (words.Length == 0)
                 throw new ArgumentException("Mapping key is empty.", nameof(key));
 
-            FirstToken = Regex.Unescape(words[0]);
+            FirstToken = rawWords[0];
             var pattern = string.Join(@"\s+", words);
             var trimmedValue = value.Trim();
             var fragmentOnly = trimmedValue.StartsWith("……", StringComparison.Ordinal) ||
                                trimmedValue.EndsWith("……", StringComparison.Ordinal);
-            if (ExactUiOnlyKeys.Contains(key.Trim()) || fragmentOnly)
+            if (ExactUiOnlyKeys.Contains(trimmedKey) || fragmentOnly)
                 pattern = $@"^\s*{pattern}\s*$";
-            else if (Regex.IsMatch(key.Trim(), @"^[A-Za-z0-9]+$"))
-                pattern = $@"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])";
-            var options = RegexOptions.CultureInvariant | RegexOptions.Compiled;
-            if (!CaseSensitiveKeys.Contains(key.Trim()))
-                options |= RegexOptions.IgnoreCase;
-            Pattern = new Regex(pattern, options);
+            else
+            {
+                if (IsAsciiLetterOrDigit(trimmedKey[0]))
+                    pattern = $@"(?<![A-Za-z0-9]){pattern}";
+                if (IsAsciiLetterOrDigit(trimmedKey[^1]))
+                    pattern = $@"{pattern}(?![A-Za-z0-9])";
+            }
+            _options = RegexOptions.CultureInvariant;
+            if (!CaseSensitiveKeys.Contains(trimmedKey))
+                _options |= RegexOptions.IgnoreCase;
+            _patternSource = pattern;
         }
 
         public string Key { get; }
         public string Value { get; }
         public string FirstToken { get; }
-        public Regex Pattern { get; }
+        public Regex Pattern => _pattern ??= new Regex(_patternSource, _options);
+
+        private static bool IsAsciiLetterOrDigit(char character) =>
+            (character >= 'A' && character <= 'Z') ||
+            (character >= 'a' && character <= 'z') ||
+            (character >= '0' && character <= '9');
+    }
+
+    private sealed class RawMapping
+    {
+        public RawMapping(string key, string value, int order)
+        {
+            Key = key;
+            Value = value;
+            Order = order;
+        }
+
+        public string Key { get; }
+        public string Value { get; }
+        public int Order { get; }
     }
 
     private static bool HandleToggleHotkey()
@@ -1512,117 +1759,113 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         public List<LegacyText> LegacyTexts { get; }
     }
 
-    private sealed class RefreshComponent : MonoBehaviour
+    private sealed class PendingPanelScan
     {
-        private Il2CppSystem.Collections.IEnumerator Start() => Loop().WrapToIl2Cpp();
-
-        private IEnumerator Loop()
+        public PendingPanelScan(GameObject root, int framesRemaining)
         {
-            var firstPass = true;
-            while (true)
-            {
-                yield return null;
-                var toggled = HandleToggleHotkey();
-                if (TranslationsEnabled && (IsCampaignScene() || IsMainMenuScene()))
-                    EnforceCampaignPanelTitleLayouts();
-                // A one-shot pass handles serialized scene text and explicit Alt+T
-                // toggles. A short bounded scan window after panel activation catches
-                // briefing labels written a few frames after SetActive returns.
-                var delayedActivationScan = PendingActivationScanFrames > 0;
-                if (delayedActivationScan)
-                    PendingActivationScanFrames--;
-                if (!firstPass && !toggled && !SceneScanRequested && !delayedActivationScan)
-                    continue;
-                firstPass = false;
-                SceneScanRequested = false;
-
-                foreach (var text in FindObjectsByType<TMP_Text>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
-                {
-                    var instanceId = text.GetInstanceID();
-                    var current = text.text;
-                    if (!TranslationsEnabled)
-                    {
-                        RestoreIfDisabled(instanceId, text);
-                        continue;
-                    }
-                    if (LastProcessedTexts.TryGetValue(instanceId, out var last) &&
-                        string.Equals(current, last, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-                    LastProcessedTexts[instanceId] = current;
-                    if (!CandidateLogged && current.Contains("Celeres", StringComparison.OrdinalIgnoreCase))
-                    {
-                        CandidateLogged = true;
-                        Logger?.LogInfo($"Found TMP text containing Celeres (length {current.Length}).");
-                    }
-                    ApplyKnownStatusOverlayFontLayout(text, current);
-                    ApplyKnownCampaignPanelTitleLayout(text, current);
-                    if (TryTranslateForDisplay(text, current, out var translated))
-                    {
-                        SetComponentText(text, current, translated);
-                    }
-                }
-                foreach (var text in FindObjectsByType<LegacyText>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
-                {
-                    var instanceId = text.GetInstanceID();
-                    var current = text.text;
-                    if (!TranslationsEnabled)
-                    {
-                        RestoreIfDisabled(instanceId, text);
-                        continue;
-                    }
-                    if (LastProcessedTexts.TryGetValue(instanceId, out var last) &&
-                        string.Equals(current, last, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-                    LastProcessedTexts[instanceId] = current;
-                    if (!CandidateLogged && current.Contains("SQUAD", StringComparison.OrdinalIgnoreCase))
-                    {
-                        CandidateLogged = true;
-                        Logger?.LogInfo($"Found legacy text containing SQUAD (length {current.Length}).");
-                    }
-                    ApplyKnownStatusOverlayFontLayout(text, current);
-                    ApplyKnownCampaignPanelTitleLayout(text, current);
-                    if (TryTranslateForDisplay(text, current, out var translated))
-                    {
-                        SetComponentText(text, current, translated);
-                    }
-                }
-                foreach (var text in FindObjectsByType<TextMesh>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
-                {
-                    var instanceId = text.GetInstanceID();
-                    var current = text.text;
-                    if (!TranslationsEnabled)
-                    {
-                        RestoreIfDisabled(instanceId, text);
-                        continue;
-                    }
-                    if (LastProcessedTexts.TryGetValue(instanceId, out var last) &&
-                        string.Equals(current, last, StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-                    LastProcessedTexts[instanceId] = current;
-                    ApplyKnownCampaignPanelTitleLayout(text, current);
-                    if (TryTranslateForDisplay(text, current, out var translated))
-                        SetComponentText(text, current, translated);
-                }
-            }
+            Root = root;
+            FramesRemaining = framesRemaining;
         }
 
+        public GameObject Root { get; }
+        public int FramesRemaining { get; set; }
+    }
+
+    private sealed class RefreshComponent : MonoBehaviour
+    {
+        private bool _firstPass = true;
+        private float _nextMappingPollTime;
+
+        private void Update()
+        {
+            if (Time.unscaledTime >= _nextMappingPollTime)
+            {
+                _nextMappingPollTime = Time.unscaledTime + 1f;
+                ReloadMappingsIfChanged();
+            }
+            var toggled = HandleToggleHotkey();
+
+            if (TranslationsEnabled && (IsCampaignScene() || IsMainMenuScene()) &&
+                Time.unscaledTime >= NextPanelTitleLayoutEnforceTime)
+            {
+                NextPanelTitleLayoutEnforceTime = Time.unscaledTime + PanelTitleLayoutEnforceInterval;
+                EnforceCampaignPanelTitleLayouts();
+            }
+
+            ProcessPendingPanelScans();
+
+            var globalScanRequested = _firstPass || toggled || SceneScanRequested || PendingGlobalScanFrames > 0;
+            if (!globalScanRequested)
+                return;
+            _firstPass = false;
+            SceneScanRequested = false;
+            if (PendingGlobalScanFrames > 0)
+                PendingGlobalScanFrames--;
+            ScanActiveSceneTexts();
+        }
+    }
+
+    private static void ProcessPendingPanelScans()
+    {
+        if (!TranslationsEnabled || PendingPanelScans.Count == 0)
+            return;
+
+        PendingPanelScanIds.Clear();
+        PendingPanelScanIds.AddRange(PendingPanelScans.Keys);
+        foreach (var instanceId in PendingPanelScanIds)
+        {
+            var pending = PendingPanelScans[instanceId];
+            if (pending.Root == null || !pending.Root.activeInHierarchy)
+            {
+                PendingPanelScans.Remove(instanceId);
+                continue;
+            }
+            // Text producers sometimes populate a newly activated panel a few
+            // frames late. Probe densely near the end of the window without
+            // walking the same hierarchy on all eight frames.
+            if (pending.FramesRemaining is 8 or 4 or 2 or 1)
+                TranslateHierarchy(pending.Root);
+            pending.FramesRemaining--;
+            if (pending.FramesRemaining <= 0)
+                PendingPanelScans.Remove(instanceId);
+        }
+    }
+
+    private static void ScanActiveSceneTexts()
+    {
+        foreach (var text in UnityEngine.Object.FindObjectsByType<TMP_Text>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        {
+            if (!CandidateLogged && text.text.Contains("Celeres", StringComparison.OrdinalIgnoreCase))
+            {
+                CandidateLogged = true;
+                Logger?.LogInfo($"Found TMP text containing Celeres (length {text.text.Length}).");
+            }
+            TranslateCurrentComponent(text);
+        }
+        foreach (var text in UnityEngine.Object.FindObjectsByType<LegacyText>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+        {
+            if (!CandidateLogged && text.text.Contains("SQUAD", StringComparison.OrdinalIgnoreCase))
+            {
+                CandidateLogged = true;
+                Logger?.LogInfo($"Found legacy text containing SQUAD (length {text.text.Length}).");
+            }
+            TranslateCurrentComponent(text);
+        }
+        foreach (var text in UnityEngine.Object.FindObjectsByType<TextMesh>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            TranslateCurrentComponent(text);
     }
 
     private static void EnforceCampaignPanelTitleLayouts()
     {
-        foreach (var pair in PanelTitleComponents.ToArray())
+        PanelTitleComponentIds.Clear();
+        PanelTitleComponentIds.AddRange(PanelTitleComponents.Keys);
+        foreach (var instanceId in PanelTitleComponentIds)
         {
-            var component = pair.Value;
-            if (component == null || !PanelTitleLayoutStates.TryGetValue(pair.Key, out var state))
+            var component = PanelTitleComponents[instanceId];
+            if (component == null || !PanelTitleLayoutStates.TryGetValue(instanceId, out var state))
             {
-                PanelTitleComponents.Remove(pair.Key);
-                PanelTitleLayoutStates.Remove(pair.Key);
+                PanelTitleComponents.Remove(instanceId);
+                PanelTitleLayoutStates.Remove(instanceId);
                 continue;
             }
 

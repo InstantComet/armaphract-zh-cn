@@ -2387,7 +2387,6 @@ USES=使用次数
 Using ground attack allows you to target a specific location, best for rockets.=使用对地攻击可瞄准具体位置，最适合发射火箭弹。
 Usseful when the commander want a specific unit attacked.=当指挥官希望集中攻击某个特定单位时非常有用。
 UTILITY=战术功能
-V0.6.3=V0.6.3(Instant_Comet汉化)
 Valkyrie Lance=Valkyrie 装骑分队
 Varnhast Lance=Varnhast 装骑分队
 Varnhast Royal Lance=Varnhast 皇家装骑分队

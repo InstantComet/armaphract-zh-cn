@@ -8,6 +8,8 @@
 
 项目地址：[github.com/InstantComet/armaphract-zh-cn](https://github.com/InstantComet/armaphract-zh-cn)
 
+**如果游玩过程中发现汉化有问题，可以按Alt+T切换原文**
+
 ## 当前版本
 
 版本号见根目录的 [`VERSION`](VERSION)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。当前发布标签为 `v0.8.15`。

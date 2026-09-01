@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.45";
+    public const string Version = "1.9.46";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -2100,12 +2100,13 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     {
         var current = component.transform;
         var depth = 0;
+        var hasButtonsAncestor = false;
         while (current != null && depth++ < 8)
         {
             if (current.name.Equals("buttons", StringComparison.OrdinalIgnoreCase))
-                return true;
+                hasButtonsAncestor = true;
             if (current.name.Equals("Menu", StringComparison.OrdinalIgnoreCase))
-                return false;
+                return hasButtonsAncestor;
             current = current.parent;
         }
         return false;

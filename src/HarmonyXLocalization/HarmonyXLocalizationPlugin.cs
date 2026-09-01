@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.44";
+    public const string Version = "1.9.45";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -398,12 +398,24 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static void OptionsMenuTogglePostfix(UIMainMenu __instance)
     {
+        if (!TranslationsEnabled)
+            return;
+
         var matched = 0;
         foreach (var text in UnityEngine.Object.FindObjectsByType<TMP_Text>(
                      FindObjectsInactive.Include, FindObjectsSortMode.None))
         {
+            if (!IsOptionsLabelsBlockPath(text))
+                continue;
+
+            // The options block starts in English and can be inactive during
+            // the scene scan. Translate it at the exact open/close boundary,
+            // then apply layout in the same frame. Do not require a previous
+            // Alt+T/global scan to make the content recognizable first.
+            TranslateCurrentComponent(text);
             if (!IsOptionsLabelsBlock(text))
                 continue;
+
             RegisterAndApplyOptionsMenuFont(text);
             matched++;
         }
@@ -413,14 +425,25 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static bool IsOptionsLabelsBlock(TMP_Text text)
     {
         var plain = PlainText(text.text);
+        if (!plain.Contains('\n'))
+            return false;
+
+        var english = plain.Contains("MASTER", StringComparison.OrdinalIgnoreCase) &&
+                      plain.Contains("MUSIC", StringComparison.OrdinalIgnoreCase) &&
+                      plain.Contains("CRT", StringComparison.OrdinalIgnoreCase) &&
+                      plain.Contains("MOUSE CONTROLS", StringComparison.OrdinalIgnoreCase);
+        var chinese = plain.Contains("总音量", StringComparison.Ordinal) &&
+                      plain.Contains("CRT", StringComparison.OrdinalIgnoreCase) &&
+                      plain.Contains("鼠标操作", StringComparison.Ordinal);
+        return english || chinese;
+    }
+
+    private static bool IsOptionsLabelsBlockPath(TMP_Text text)
+    {
         return text.name.Equals("text", StringComparison.OrdinalIgnoreCase) &&
                text.transform.parent != null &&
                text.transform.parent.name.Equals("options", StringComparison.OrdinalIgnoreCase) &&
-               HasAncestorNamed(text.transform, "Menu", 4) &&
-               plain.Contains('\n') &&
-               plain.Contains("总音量", StringComparison.Ordinal) &&
-               plain.Contains("CRT", StringComparison.OrdinalIgnoreCase) &&
-               plain.Contains("鼠标操作", StringComparison.Ordinal);
+               HasAncestorNamed(text.transform, "Menu", 4);
     }
 
     private static bool IsOptionsLeftLabel(string value)
@@ -678,7 +701,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     {
         if (!__0 || !TranslationsEnabled || PanelActivationTranslationInProgress ||
             __instance == null || !__instance.activeInHierarchy ||
-            __instance.transform is not RectTransform)
+            !IsLikelyUiActivation(__instance.transform))
             return;
         PanelActivationTranslationInProgress = true;
         var hasText = false;
@@ -695,6 +718,32 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             var instanceId = __instance.GetInstanceID();
             PendingPanelScans[instanceId] = new PendingPanelScan(__instance, DelayedPanelScanFrames);
         }
+    }
+
+    private static bool IsLikelyUiActivation(Transform transform)
+    {
+        if (transform is RectTransform)
+            return true;
+
+        // Some of the game's TMP menus are world-space objects with ordinary
+        // Transforms (not RectTransforms). Retain the cheap activation filter,
+        // but admit known UI/menu hierarchies so those panels are translated
+        // before their first rendered frame.
+        Transform? current = transform;
+        var depth = 0;
+        while (current != null && depth++ < 12)
+        {
+            var name = current.name;
+            if (name.Equals("UI", StringComparison.OrdinalIgnoreCase) ||
+                name.EndsWith("UI", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("Canvas", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("Menu", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            current = current.parent;
+        }
+        return false;
     }
 
     private static bool TranslateHierarchy(GameObject root)

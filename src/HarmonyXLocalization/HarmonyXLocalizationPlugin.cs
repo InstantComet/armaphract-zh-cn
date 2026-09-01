@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.46";
+    public const string Version = "1.9.63";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -56,6 +56,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly List<Component> CachedPauseMenuButtonTexts = new();
     private static readonly Dictionary<int, StatusOverlayTexts> StatusOverlayTextCache = new();
     private static readonly Queue<int> StatusOverlayTextCacheOrder = new();
+    private static readonly HashSet<int> StatusOverlayComponentIds = new();
+    private static readonly Dictionary<int, string> LastStatusOverlaySources = new();
     private static readonly Dictionary<int, string> LastProcessedTexts = new();
     // Setting TMP_Text.text from the fallback scanner re-enters the patched
     // setter.  Keep that write out of the translation pipeline; otherwise a
@@ -80,6 +82,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly HashSet<string> MenuTranslationEntryTracesLogged = new(StringComparer.Ordinal);
     private static readonly HashSet<int> MenuDisplayComponentsLogged = new();
     private static readonly HashSet<string> FragmentedTranslationsLogged = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> UntranslatedCombatChatterLogged = new(StringComparer.Ordinal);
     private static readonly Regex HtmlTagRegex = new("<[^>]+>", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ObjectiveCounterRegex = new(
         @"\s*\[\d+\s*/\s*\d+\]\s*$",
@@ -90,15 +93,63 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Regex NoAmmoForRegex = new(
         @"^\s*NO\s+AMMO\s+FOR\s+(.+?)\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex NoAmmoForTokenRegex = new(
+        @"(?<![A-Za-z])NO\s+AMMO\s+FOR\s+(?<weapon>[^\r\n]+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex MissingCrewRegex = new(
         @"^\s*MISSING\s+CREW\s*:\s*(.+?)\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex LowEngineTorqueRegex = new(
         @"^\s*(?:LOW|INSUFFICIENT)\s+ENGINE\s+TORQUE\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex LowEnginePowerRegex = new(
+        @"^\s*(?:LOW|INSUFFICIENT)\s+ENGINE\s+POWER\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex EngineTorqueWarningTokenRegex = new(
+        @"(?<![A-Za-z])(?:LOW|INSUFFICIENT)\s+ENGINE\s+TORQUE\s*:\s*([0-9]+(?:\.[0-9]+)?)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex PartiallyTranslatedEngineTorqueWarningRegex = new(
+        @"发动机不足\s*TORQUE\s*:\s*([0-9]+(?:\.[0-9]+)?)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex EnginePowerWarningTokenRegex = new(
+        @"(?<![A-Za-z])(?:LOW|INSUFFICIENT)\s+ENGINE\s+POWER(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex PartiallyTranslatedEnginePowerWarningRegex = new(
+        @"发动机不足\s*POWER(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex LowAmmunitionWarningTokenRegex = new(
+        @"(?<![A-Za-z])LOW[ \t]+(?:AMMUNITION|弹药)[ \t]*:[ \t]*(?<ammo>[^\r\n]+)(?<category>\r?\n[ \t]*\[[ \t]*(?:AMMUNITION|弹药)[ \t]*\])?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant);
     private static readonly Regex RequiresRoleRegex = new(
         @"^\s*REQUIRES\s+(.+?)\s+ROLE\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex BrokenStatusTokenRegex = new(
+        @"(?<![A-Za-z])BROKEN(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex DamagedStatusTokenRegex = new(
+        @"(?<![A-Za-z])DAMAGED(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex FailureStatusTokenRegex = new(
+        @"(?<![A-Za-z])FAILURE(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ReducedStatusTokenRegex = new(
+        @"(?<![A-Za-z])REDUCED(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex UnsafeStatusTokenRegex = new(
+        @"(?<![A-Za-z])UNSAFE(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex RoutedStatusTokenRegex = new(
+        @"(?<![A-Za-z])ROUTED(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex BleedoutStatusTokenRegex = new(
+        @"(?<![A-Za-z])BLEEDOUT(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex StunnedStatusTokenRegex = new(
+        @"(?<![A-Za-z])STUNNED(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex JammerStatusTokenRegex = new(
+        @"(?<![A-Za-z])JAMMER(?=\s+(?:BROKEN|损坏)(?![A-Za-z]))",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ChineseCharacterRegex = new(
         @"[\u3400-\u9fff]",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -110,6 +161,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ContractHighValueRegex = new(
         @"(?<![A-Za-z])HIGH(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ContractMediumValueRegex = new(
+        @"(?<![A-Za-z])MEDIUM(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ContractLowValueRegex = new(
+        @"(?<![A-Za-z])LOW(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ContractExtremeValueRegex = new(
         @"(?<![A-Za-z])EXTREME(?![A-Za-z])",
@@ -123,11 +180,17 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Regex MainMenuVersionRegex = new(
         @"(?<![A-Za-z0-9])V0\.6\.3(?![A-Za-z0-9])",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex ModuleUiTokenRegex = new(
+        @"(?<![A-Za-z])(?:INFANTRY REPLENISHMENT SECTION|ANTI-TANK MISSILE|MEDICAL MATERIALS|REPAIR MATERIALS|TURRET TRAVERSE|AMMUNITION REPLENISHMENT|AMMO REPLENISHMENT|ENGINE POWER|REVERSE GEAR|TURN SPEED|ACCELERATION|PROTECTION|COOLDOWN|APPLIQUE|DURATION|TORQUE|RANGE|TYPE)(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ReplenishmentClassTokenRegex = new(
+        @"(?<![A-Za-z])(?:LIGHT|HEAVY|ADVANCED)(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly HashSet<string> ExactUiOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "COMMAND", "DRIVER", "GUNNER", "LOADER",
         "FAIR", "MEDIUM", "LOW", "WEAK", "FALLING",
-        "STUNNED", "LIGHT"
+        "STUNNED", "LIGHT", "HEAVY", "ADVANCED"
     };
     private static readonly HashSet<string> CaseSensitiveKeys = new(StringComparer.Ordinal)
     {
@@ -137,12 +200,47 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         // Dynamic module statuses are emitted in uppercase. Keep this suffix
         // fallback case-sensitive so normal prose such as "broken mirror" is
         // handled only by its complete sentence mapping.
-        "BROKEN", "DAMAGED", "FAILURE", "HIGH", "UNSAFE", "ROUTED", "BLEEDOUT",
+        "BROKEN", "DAMAGED", "FAILURE", "HIGH", "UNSAFE", "ROUTED", "BLEEDOUT", "JAMMER",
         "ASSAULT SQUAD", "MED",
         "TYPE", "INTERCEPTOR", "COOLDOWN", "RANGE", "USES", "ANGLE",
         "INFANTRY REPLENISHMENT SECTION", "MEDICAL MATERIALS", "REPAIR MATERIALS",
         "REACTIVE", "APPLIQUE", "PROTECTION", "ENGINE POWER", "ACCELERATION",
         "TORQUE", "TURRET TRAVERSE"
+    };
+    private static readonly Dictionary<string, string> ModuleUiTokenTranslations = new(StringComparer.Ordinal)
+    {
+        ["INFANTRY REPLENISHMENT SECTION"] = "步兵补员舱",
+        ["ANTI-TANK MISSILE"] = "反坦克导弹",
+        ["MEDICAL MATERIALS"] = "医疗物资",
+        ["REPAIR MATERIALS"] = "维修物资",
+        ["TURRET TRAVERSE"] = "炮塔转速",
+        ["AMMUNITION REPLENISHMENT"] = "弹药补给",
+        ["AMMO REPLENISHMENT"] = "弹药补给",
+        ["ENGINE POWER"] = "发动机功率",
+        ["REVERSE GEAR"] = "倒车挡",
+        ["TURN SPEED"] = "转向速度",
+        ["ACCELERATION"] = "加速度",
+        ["PROTECTION"] = "防护",
+        ["COOLDOWN"] = "冷却时间",
+        ["APPLIQUE"] = "附加式",
+        ["DURATION"] = "持续时间",
+        ["TORQUE"] = "扭矩",
+        ["RANGE"] = "射程",
+        ["TYPE"] = "类型"
+    };
+    private static readonly Dictionary<string, string> ReplenishmentClassTranslations = new(StringComparer.Ordinal)
+    {
+        ["LIGHT"] = "轻型",
+        ["HEAVY"] = "重型",
+        ["ADVANCED"] = "高级"
+    };
+    private static readonly Dictionary<string, string> CrewRoleTranslations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["COMMAND"] = "车长",
+        ["COMMANDER"] = "车长",
+        ["DRIVER"] = "驾驶员",
+        ["GUNNER"] = "炮手",
+        ["LOADER"] = "装填手"
     };
     private static readonly Dictionary<string, string> ModuleStatLabels = new(StringComparer.Ordinal)
     {
@@ -277,6 +375,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         PatchOptionsMenu(harmony);
         PatchCampaignMissionData(harmony);
         PatchSceneLoaded(harmony);
+        PatchCombatChatter(harmony);
         PatchUnitStatusWriters(harmony);
         PatchScreenStatusWriters(harmony);
         PatchUiToolkitTextWriters(harmony);
@@ -813,19 +912,25 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             // contains values such as HIGH. GetParsedText reads that buffer.
             var parsed = tmpText.GetParsedText();
             if (!string.IsNullOrEmpty(parsed) &&
-                (ContractHighValueRegex.IsMatch(parsed) ||
+                (ContractLowValueRegex.IsMatch(parsed) ||
+                 ContractMediumValueRegex.IsMatch(parsed) ||
+                 ContractHighValueRegex.IsMatch(parsed) ||
                  ContractExtremeValueRegex.IsMatch(parsed)))
             {
                 source = parsed;
             }
         }
 
-        if (!source.Contains("HIGH", StringComparison.Ordinal) &&
+        if (!source.Contains("LOW", StringComparison.Ordinal) &&
+            !source.Contains("MEDIUM", StringComparison.Ordinal) &&
+            !source.Contains("HIGH", StringComparison.Ordinal) &&
             !source.Contains("EXTREME", StringComparison.Ordinal))
             return;
 
         var translated = ContractExtremeValueRegex.Replace(source, "极高");
         translated = ContractHighValueRegex.Replace(translated, "高");
+        translated = ContractMediumValueRegex.Replace(translated, "中");
+        translated = ContractLowValueRegex.Replace(translated, "低");
         if (string.Equals(source, translated, StringComparison.Ordinal))
             return;
 
@@ -1032,6 +1137,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         TargetedUiComponentsCached = false;
         StatusOverlayTextCache.Clear();
         StatusOverlayTextCacheOrder.Clear();
+        StatusOverlayComponentIds.Clear();
+        LastStatusOverlaySources.Clear();
         LastProcessedTexts.Clear();
         InternalTextWrites.Clear();
         PendingPanelScans.Clear();
@@ -1050,7 +1157,48 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         MenuTranslationEntryTracesLogged.Clear();
         MenuDisplayComponentsLogged.Clear();
         FragmentedTranslationsLogged.Clear();
+        UntranslatedCombatChatterLogged.Clear();
         CandidateLogged = false;
+    }
+
+    private static void PatchCombatChatter(Harmony harmony)
+    {
+        var method = AccessTools.Method(
+            typeof(UIStream),
+            "GetRandomChatterLine",
+            new[] { typeof(CrewMemberTemplate), typeof(string) });
+        if (method == null)
+        {
+            Logger?.LogWarning("Could not find UIStream.GetRandomChatterLine for combat chatter localization.");
+            return;
+        }
+
+        harmony.Patch(
+            method,
+            postfix: new HarmonyMethod(
+                typeof(HarmonyXLocalizationPlugin), nameof(CombatChatterPostfix)));
+        Logger?.LogInfo("Patched UIStream.GetRandomChatterLine before chatter placeholder expansion.");
+    }
+
+    private static void CombatChatterPostfix(string __1, ref string __result)
+    {
+        if (!TranslationsEnabled || string.IsNullOrWhiteSpace(__result))
+            return;
+
+        // One upstream YAML entry has a trailing space. Normalize only the
+        // lookup source; the translated radio line does not need that padding.
+        var source = __result.TrimEnd();
+        if (TryTranslate(source, out var translated))
+        {
+            __result = translated;
+            return;
+        }
+
+        if (ContainsVisibleLatinLetter(source) && UntranslatedCombatChatterLogged.Add(source))
+        {
+            Logger?.LogWarning(
+                $"Untranslated combat chatter: type={__1}, source={source}");
+        }
     }
 
     private static void TranslateCurrentComponent(Component component)
@@ -1125,6 +1273,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             postfix: new HarmonyMethod(typeof(HarmonyXLocalizationPlugin), nameof(UnitScreenStatusPostfix)));
         harmony.Patch(
             AccessTools.Method(typeof(UIManager), nameof(UIManager.ManageScreenStatuses)),
+            prefix: new HarmonyMethod(typeof(HarmonyXLocalizationPlugin), nameof(ManageScreenStatusesPrefix)),
             postfix: new HarmonyMethod(typeof(HarmonyXLocalizationPlugin), nameof(ManageScreenStatusesPostfix)));
         harmony.Patch(
             AccessTools.Method(
@@ -1243,30 +1392,221 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         }
     }
 
+    private static void ManageScreenStatusesPrefix(UIManager __instance)
+    {
+        if (!TranslationsEnabled || __instance == null || __instance.unitsWithStatus == null)
+            return;
+
+        // Never carry the previous translated state into the game's per-frame
+        // SetText call. Do not rewrite the prefab's STATUS template here: the
+        // native writer consumes only live slots, so restoring unused slots
+        // would expose those placeholders on screen.
+        foreach (var pair in __instance.unitsWithStatus)
+        {
+            if (pair.Value == null)
+                continue;
+            var texts = GetStatusOverlayTexts(pair.Value);
+            foreach (var text in texts.TmpTexts)
+                ClearStatusOverlayTranslationState(text);
+            foreach (var text in texts.LegacyTexts)
+                ClearStatusOverlayTranslationState(text);
+        }
+    }
+
     private static void TranslateStatusOverlay(GameObject overlay)
     {
-        var overlayId = overlay.GetInstanceID();
-        if (!StatusOverlayTextCache.TryGetValue(overlayId, out var texts))
-        {
-            while (StatusOverlayTextCache.Count >= 128 && StatusOverlayTextCacheOrder.Count > 0)
-                StatusOverlayTextCache.Remove(StatusOverlayTextCacheOrder.Dequeue());
-            texts = new StatusOverlayTexts(
-                overlay.GetComponentsInChildren<TMP_Text>(true),
-                overlay.GetComponentsInChildren<LegacyText>(true));
-            StatusOverlayTextCache[overlayId] = texts;
-            StatusOverlayTextCacheOrder.Enqueue(overlayId);
-        }
+        var texts = GetStatusOverlayTexts(overlay);
 
         foreach (var text in texts.TmpTexts)
         {
             if (text != null)
-                TranslateCurrentComponent(text);
+                TranslateStatusOverlayTmpText(text);
         }
         foreach (var text in texts.LegacyTexts)
         {
             if (text != null)
+            {
+                ApplyStatusOverlayFontLayout(text, text.text, text.text, force: true);
                 TranslateCurrentComponent(text);
+            }
         }
+    }
+
+    private static StatusOverlayTexts GetStatusOverlayTexts(GameObject overlay)
+    {
+        var overlayId = overlay.GetInstanceID();
+        if (StatusOverlayTextCache.TryGetValue(overlayId, out var cached))
+            return cached;
+
+        while (StatusOverlayTextCache.Count >= 128 && StatusOverlayTextCacheOrder.Count > 0)
+            StatusOverlayTextCache.Remove(StatusOverlayTextCacheOrder.Dequeue());
+
+        var texts = new StatusOverlayTexts(
+            overlay.GetComponentsInChildren<TMP_Text>(true),
+            overlay.GetComponentsInChildren<LegacyText>(true));
+        StatusOverlayTextCache[overlayId] = texts;
+        StatusOverlayTextCacheOrder.Enqueue(overlayId);
+        RegisterStatusOverlayTexts(texts);
+        return texts;
+    }
+
+    private static void RegisterStatusOverlayTexts(StatusOverlayTexts texts)
+    {
+        foreach (var text in texts.TmpTexts)
+        {
+            if (text == null)
+                continue;
+            var instanceId = text.GetInstanceID();
+            StatusOverlayComponentIds.Add(instanceId);
+        }
+        foreach (var text in texts.LegacyTexts)
+        {
+            if (text == null)
+                continue;
+            var instanceId = text.GetInstanceID();
+            StatusOverlayComponentIds.Add(instanceId);
+        }
+    }
+
+    private static void ClearStatusOverlayTranslationState(Component? component)
+    {
+        if (component == null)
+            return;
+        var instanceId = component.GetInstanceID();
+        AppliedStates.Remove(instanceId);
+        LastProcessedTexts.Remove(instanceId);
+    }
+
+    private static void TranslateStatusOverlayTmpText(TMP_Text text)
+    {
+        var current = text.text;
+        var source = current;
+
+        // The native status writer can update TMP's rendered character buffer
+        // without updating .text.  This is the same formatted-writer behavior
+        // used by campaign danger values: GetParsedText is the only place that
+        // exposes the actual BLEEDOUT/STUNNED block before the frame is drawn.
+        var parsed = text.GetParsedText();
+        if (!string.IsNullOrEmpty(parsed) &&
+            !string.Equals(parsed, current, StringComparison.Ordinal) &&
+            !IsScreenStatusTemplateText(parsed))
+        {
+            source = parsed;
+        }
+
+        var sourceWithPlaceholders = source;
+        var strippedPlaceholders = TryStripStatusPlaceholderLines(source, out var withoutPlaceholders);
+        if (strippedPlaceholders)
+        {
+            if (withoutPlaceholders.Length == 0)
+            {
+                SetComponentText(text, source, string.Empty);
+                return;
+            }
+            source = withoutPlaceholders;
+        }
+
+        // This component was reached through UIManager.unitsWithStatus, so it
+        // is a confirmed world-space status label. Composite blocks may end in
+        // an ammunition line or an already translated state and therefore do
+        // not reliably match the text-based heuristic used elsewhere.
+        ApplyStatusOverlayFontLayout(text, source, source, force: true);
+        LogStatusOverlaySourceChange(text, source);
+
+        if (string.Equals(source, current, StringComparison.Ordinal))
+        {
+            TranslateCurrentComponent(text);
+            return;
+        }
+
+        ApplyKnownStatusOverlayFontLayout(text, source);
+        if (!TryTranslateForDisplay(text, source, out var translated))
+        {
+            if (strippedPlaceholders)
+                SetComponentText(text, sourceWithPlaceholders, source);
+            return;
+        }
+
+        LogCampaignDynamicTargetOnce("status-buffer", text, PlainText(source), PlainText(translated));
+        SetComponentText(text, sourceWithPlaceholders, translated);
+    }
+
+    private static void LogStatusOverlaySourceChange(TMP_Text text, string source)
+    {
+        var plain = PlainText(source);
+        if (plain.Length == 0 || plain.Equals("STATUS", StringComparison.Ordinal) ||
+            IsScreenStatusTemplateText(source))
+        {
+            return;
+        }
+
+        var instanceId = text.GetInstanceID();
+        if (LastStatusOverlaySources.TryGetValue(instanceId, out var previous) &&
+            string.Equals(previous, plain, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        LastStatusOverlaySources[instanceId] = plain;
+        Logger?.LogInfo(
+            $"Status overlay source changed: id={instanceId}, text={plain.Replace("\n", "\\n", StringComparison.Ordinal)}");
+    }
+
+    private static bool ContainsDynamicStatusToken(string value)
+    {
+        return BrokenStatusTokenRegex.IsMatch(value) ||
+               DamagedStatusTokenRegex.IsMatch(value) ||
+               FailureStatusTokenRegex.IsMatch(value) ||
+               ReducedStatusTokenRegex.IsMatch(value) ||
+               UnsafeStatusTokenRegex.IsMatch(value) ||
+               RoutedStatusTokenRegex.IsMatch(value) ||
+               BleedoutStatusTokenRegex.IsMatch(value) ||
+               StunnedStatusTokenRegex.IsMatch(value);
+    }
+
+    private static bool TryStripStatusPlaceholderLines(string value, out string stripped)
+    {
+        if (!value.Contains("STATUS", StringComparison.Ordinal) &&
+            !value.Contains("状态", StringComparison.Ordinal))
+        {
+            stripped = value;
+            return false;
+        }
+
+        var lines = value.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var kept = new List<string>(lines.Length);
+        var removed = false;
+        foreach (var line in lines)
+        {
+            var plain = PlainText(line);
+            if (plain.Equals("STATUS", StringComparison.Ordinal) ||
+                plain.Equals("状态", StringComparison.Ordinal))
+            {
+                removed = true;
+                continue;
+            }
+            kept.Add(line);
+        }
+
+        stripped = string.Join("\n", kept).Trim('\n');
+        return removed;
+    }
+
+    private static bool IsStatusOverlayUpdate(string value)
+    {
+        var plain = PlainText(value);
+        return ContainsDynamicStatusToken(value) ||
+               IsStatusOverlayLabel(value) ||
+               plain.Equals("SUPPRESSED", StringComparison.OrdinalIgnoreCase) ||
+               plain.Equals("PINNED DOWN", StringComparison.OrdinalIgnoreCase) ||
+               plain.Equals("ROUTED", StringComparison.OrdinalIgnoreCase) ||
+               plain.Equals("BLEEDOUT", StringComparison.OrdinalIgnoreCase) ||
+               plain.Equals("STUNNED", StringComparison.OrdinalIgnoreCase) ||
+               plain.Equals("受压制", StringComparison.Ordinal) ||
+               plain.Equals("被压制", StringComparison.Ordinal) ||
+               plain.Equals("溃逃", StringComparison.Ordinal) ||
+               plain.Equals("失血", StringComparison.Ordinal) ||
+               plain.Equals("眩晕", StringComparison.Ordinal);
     }
 
     private static void ScreenStatusTextPrefix(object[] __args)
@@ -1598,8 +1938,10 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         if (!IsCampaignScene() || !plain.Contains('\n') || !ContractCoordinateRegex.IsMatch(plain))
             return value;
 
-        var translated = ContractHighValueRegex.Replace(value, "高");
-        return ContractExtremeValueRegex.Replace(translated, "极高");
+        var translated = ContractExtremeValueRegex.Replace(value, "极高");
+        translated = ContractHighValueRegex.Replace(translated, "高");
+        translated = ContractMediumValueRegex.Replace(translated, "中");
+        return ContractLowValueRegex.Replace(translated, "低");
     }
 
     private static bool IsMainMenuScene()
@@ -1631,6 +1973,17 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             return;
         }
 
+        if (StatusOverlayComponentIds.Contains(instanceId) &&
+            TryStripStatusPlaceholderLines(value, out var withoutStatusPlaceholders))
+        {
+            value = withoutStatusPlaceholders;
+            if (value.Length == 0)
+            {
+                LastProcessedTexts[instanceId] = value;
+                return;
+            }
+        }
+
         // SetTextStatus translates the producer argument before the native UI
         // component receives it.  If the setter therefore sees the already
         // translated value, still apply the status-overlay font layout here.
@@ -1654,12 +2007,17 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
             if (string.Equals(value, previous.Original, StringComparison.Ordinal))
                 source = previous.Original;
-            else if (IsMixedLanguageText(value) && ContainsCjk(previous.Translated))
+            else if (IsMixedLanguageText(value) &&
+                     ContainsCjk(previous.Translated) &&
+                     !StatusOverlayComponentIds.Contains(instanceId) &&
+                     !IsStatusOverlayUpdate(value))
             {
                 // A native writer can expose the control between two writes,
                 // after another hook has already translated only part of the
-                // string.  Never promote that mixed-language value to a new
-                // source state: keep the last complete translation visible.
+                // string. Never promote that mixed-language value to a new
+                // source state in ordinary UI. Status overlays are excluded:
+                // their legitimate next state is frequently a mixed block,
+                // and retaining the previous translation would freeze it.
                 value = previous.Translated;
                 LastProcessedTexts[instanceId] = value;
                 return;
@@ -1892,9 +2250,13 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ApplyCampaignPanelTitleLayout(component, PlainText(value));
     }
 
-    private static void ApplyStatusOverlayFontLayout(Component component, string source, string translated)
+    private static void ApplyStatusOverlayFontLayout(
+        Component component,
+        string source,
+        string translated,
+        bool force = false)
     {
-        if (!IsStatusOverlayLabel(source) && !IsStatusOverlayLabel(translated))
+        if (!force && !IsStatusOverlayLabel(source) && !IsStatusOverlayLabel(translated))
             return;
 
         var instanceId = component.GetInstanceID();
@@ -2284,11 +2646,26 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static bool TryTranslate(string value, out string translated)
     {
         TraceMenuTranslationEntry(value);
+        if (IsScreenStatusTemplateText(value))
+        {
+            // The world-space warning prefab uses STATUS on every line as a
+            // sentinel. The game replaces the block only while those markers
+            // are intact, so translating them during activation prevents the
+            // real warning from ever being populated until Alt+T restores it.
+            translated = value;
+            return false;
+        }
         if (TranslationCache.TryGetValue(value, out var cached))
         {
             translated = cached;
             return !string.Equals(value, cached, StringComparison.Ordinal);
         }
+        if (TryNormalizeAmmunitionWarningTokens(value, out translated))
+            return true;
+        if (TryNormalizeEngineWarningTokens(value, out translated))
+            return true;
+        if (TryNormalizeDynamicStatusTokens(value, out translated))
+            return true;
         if (value.Contains("DAY", StringComparison.OrdinalIgnoreCase) || value.Contains('日'))
         {
             var campaignDayFormat = CampaignDayFormatRegex.Match(PlainText(value));
@@ -2319,13 +2696,26 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             return !string.Equals(value, translated, StringComparison.Ordinal);
         }
 
-        if (value.StartsWith("LOW", StringComparison.OrdinalIgnoreCase) ||
-            value.StartsWith("INSUFFICIENT", StringComparison.OrdinalIgnoreCase))
+        var plainWarning = value;
+        if (value.IndexOf('<') >= 0 &&
+            (value.Contains("ENGINE", StringComparison.OrdinalIgnoreCase) ||
+             value.Contains("AMMUNITION", StringComparison.OrdinalIgnoreCase)))
         {
-            var lowEngineTorque = LowEngineTorqueRegex.Match(value);
+            plainWarning = PlainText(value);
+        }
+        if (plainWarning.StartsWith("LOW", StringComparison.OrdinalIgnoreCase) ||
+            plainWarning.StartsWith("INSUFFICIENT", StringComparison.OrdinalIgnoreCase))
+        {
+            var lowEngineTorque = LowEngineTorqueRegex.Match(plainWarning);
             if (lowEngineTorque.Success)
             {
                 translated = $"发动机扭矩过低：{lowEngineTorque.Groups[1].Value}";
+                CacheTranslation(value, translated);
+                return true;
+            }
+            if (LowEnginePowerRegex.IsMatch(plainWarning))
+            {
+                translated = "发动机功率不足";
                 CacheTranslation(value, translated);
                 return true;
             }
@@ -2336,7 +2726,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             if (requiresRole.Success)
             {
                 var role = requiresRole.Groups[1].Value.Trim();
-                if (!TryTranslate(role, out var translatedRole))
+                if (!CrewRoleTranslations.TryGetValue(role, out var translatedRole) &&
+                    !TryTranslate(role, out translatedRole))
                     translatedRole = role;
                 translated = $"需要{translatedRole}职务";
                 CacheTranslation(value, translated);
@@ -2362,7 +2753,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             if (missingCrew.Success)
             {
                 var role = missingCrew.Groups[1].Value.Trim();
-                if (!TryTranslate(role, out var translatedRole))
+                if (!CrewRoleTranslations.TryGetValue(role, out var translatedRole) &&
+                    !TryTranslate(role, out translatedRole))
                     translatedRole = role;
                 translated = $"缺少乘员：{translatedRole}";
                 CacheTranslation(value, translated);
@@ -2379,6 +2771,11 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                 return true;
             }
         }
+
+        // Run broad module-token replacement only after complete dynamic
+        // warnings, so LOW ENGINE TORQUE/POWER retain their dedicated wording.
+        if (TryNormalizeModuleUiTokens(value, out translated))
+            return true;
 
         if (!ContainsVisibleLatinLetter(value))
         {
@@ -2406,6 +2803,176 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         }
         translated = result;
         return changed;
+    }
+
+    private static bool TryNormalizeAmmunitionWarningTokens(string value, out string translated)
+    {
+        var hasLowAmmunition = value.Contains("LOW", StringComparison.OrdinalIgnoreCase) &&
+                               (value.Contains("AMMUNITION", StringComparison.OrdinalIgnoreCase) ||
+                                value.Contains("弹药", StringComparison.Ordinal));
+        var hasNoAmmoFor = value.Contains("NO AMMO FOR", StringComparison.OrdinalIgnoreCase);
+        if (!hasLowAmmunition && !hasNoAmmoFor)
+        {
+            translated = value;
+            return false;
+        }
+
+        var normalized = value;
+        if (hasNoAmmoFor)
+        {
+            normalized = NoAmmoForTokenRegex.Replace(normalized, match =>
+            {
+                var weapon = match.Groups["weapon"].Value.Trim();
+                if (!TryTranslate(weapon, out var translatedWeapon))
+                    translatedWeapon = weapon;
+                return $"{translatedWeapon}无弹药";
+            });
+        }
+        if (hasLowAmmunition)
+        {
+            normalized = LowAmmunitionWarningTokenRegex.Replace(normalized, match =>
+            {
+                var ammunition = match.Groups["ammo"].Value.Trim();
+                if (!TryTranslate(ammunition, out var translatedAmmunition))
+                    translatedAmmunition = ammunition;
+                var category = match.Groups["category"].Success ? "\n[弹药]" : string.Empty;
+                return $"弹药不足：{translatedAmmunition}{category}";
+            });
+        }
+        if (string.Equals(value, normalized, StringComparison.Ordinal))
+        {
+            translated = value;
+            return false;
+        }
+
+        if (!TryTranslate(normalized, out translated))
+            translated = normalized;
+        CacheTranslation(value, translated);
+        return true;
+    }
+
+    private static bool TryNormalizeEngineWarningTokens(string value, out string translated)
+    {
+        var normalized = value;
+        if (normalized.Contains("TORQUE", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = EngineTorqueWarningTokenRegex.Replace(
+                normalized,
+                match => $"发动机扭矩过低：{match.Groups[1].Value}");
+            normalized = PartiallyTranslatedEngineTorqueWarningRegex.Replace(
+                normalized,
+                match => $"发动机扭矩过低：{match.Groups[1].Value}");
+        }
+        if (normalized.Contains("POWER", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = EnginePowerWarningTokenRegex.Replace(normalized, "发动机功率不足");
+            normalized = PartiallyTranslatedEnginePowerWarningRegex.Replace(normalized, "发动机功率不足");
+        }
+
+        if (string.Equals(value, normalized, StringComparison.Ordinal))
+        {
+            translated = value;
+            return false;
+        }
+
+        // Continue translating the other warnings that share this text block.
+        if (!TryTranslate(normalized, out translated))
+            translated = normalized;
+        CacheTranslation(value, translated);
+        return true;
+    }
+
+    private static bool IsScreenStatusTemplateText(string value)
+    {
+        if (!value.Contains('\n') || !value.Contains("STATUS", StringComparison.Ordinal))
+            return false;
+
+        var lines = PlainText(value).Split('\n');
+        var statusLineCount = 0;
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0)
+                continue;
+            if (!trimmed.Equals("STATUS", StringComparison.Ordinal))
+                return false;
+            statusLineCount++;
+        }
+        return statusLineCount >= 2;
+    }
+
+    private static bool TryNormalizeDynamicStatusTokens(string value, out string translated)
+    {
+        var normalized = value;
+        if (normalized.Contains("JAMMER", StringComparison.Ordinal))
+            normalized = JammerStatusTokenRegex.Replace(normalized, "干扰机");
+        if (normalized.Contains("BROKEN", StringComparison.Ordinal))
+            normalized = BrokenStatusTokenRegex.Replace(normalized, "损坏");
+        if (normalized.Contains("DAMAGED", StringComparison.Ordinal))
+            normalized = DamagedStatusTokenRegex.Replace(normalized, "受损");
+        if (normalized.Contains("FAILURE", StringComparison.Ordinal))
+            normalized = FailureStatusTokenRegex.Replace(normalized, "故障");
+        if (normalized.Contains("REDUCED", StringComparison.Ordinal))
+            normalized = ReducedStatusTokenRegex.Replace(normalized, "降低");
+        if (normalized.Contains("UNSAFE", StringComparison.Ordinal))
+            normalized = UnsafeStatusTokenRegex.Replace(normalized, "危险");
+        if (normalized.Contains("ROUTED", StringComparison.Ordinal))
+            normalized = RoutedStatusTokenRegex.Replace(normalized, "溃逃");
+        if (normalized.Contains("BLEEDOUT", StringComparison.Ordinal))
+            normalized = BleedoutStatusTokenRegex.Replace(normalized, "失血");
+        if (normalized.Contains("STUNNED", StringComparison.Ordinal))
+            normalized = StunnedStatusTokenRegex.Replace(normalized, "眩晕");
+
+        if (string.Equals(value, normalized, StringComparison.Ordinal))
+        {
+            translated = value;
+            return false;
+        }
+
+        // Continue through the normal pipeline so a composite such as
+        // "SMOKE BROKEN" becomes fully localized, not merely "SMOKE 损坏".
+        if (!TryTranslate(normalized, out translated))
+            translated = normalized;
+        CacheTranslation(value, translated);
+        return true;
+    }
+
+    private static bool TryNormalizeModuleUiTokens(string value, out string translated)
+    {
+        var normalized = ModuleUiTokenRegex.Replace(
+            value,
+            match => ModuleUiTokenTranslations[match.Value]);
+
+        // The replenishment module presents these three ammunition classes in
+        // the same dynamic multiline block. Keep LIGHT context-sensitive so it
+        // does not collide with damage severities or amount labels elsewhere.
+        var replenishmentBlock =
+            value.Contains("MEDICAL MATERIALS", StringComparison.Ordinal) ||
+            value.Contains("REPAIR MATERIALS", StringComparison.Ordinal) ||
+            value.Contains("AMMUNITION REPLENISHMENT", StringComparison.Ordinal) ||
+            value.Contains("AMMO REPLENISHMENT", StringComparison.Ordinal) ||
+            value.Contains("医疗物资", StringComparison.Ordinal) ||
+            value.Contains("维修物资", StringComparison.Ordinal) ||
+            value.Contains("弹药补给", StringComparison.Ordinal);
+        if (replenishmentBlock)
+        {
+            normalized = ReplenishmentClassTokenRegex.Replace(
+                normalized,
+                match => ReplenishmentClassTranslations[match.Value]);
+        }
+
+        if (string.Equals(value, normalized, StringComparison.Ordinal))
+        {
+            translated = value;
+            return false;
+        }
+
+        // Preserve model names and numeric values while allowing any remaining
+        // exact mappings in the multiline block to run normally.
+        if (!TryTranslate(normalized, out translated))
+            translated = normalized;
+        CacheTranslation(value, translated);
+        return true;
     }
 
     private static void TraceMenuTranslationEntry(string value)

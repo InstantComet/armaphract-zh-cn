@@ -1,6 +1,7 @@
 # ARMAPHRACT(暂定译名：装甲重骑) 0.6.3 简体中文补丁
 
 ## [ARMAPHRACT游戏官方发布页](https://aeoriii.itch.io/ironmirage)  
+### 非官方口口群1121139986
 
 这是针对 ARMAPHRACT(暂定译名：装甲重骑) `0.6.3` 的简体中文本地化补丁，运行于 BepInEx IL2CPP 环境，并使用 HarmonyX 处理部分游戏 UI 文本。
 

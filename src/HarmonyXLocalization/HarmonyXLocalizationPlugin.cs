@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.73";
+    public const string Version = "1.9.74";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -182,6 +182,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex MainMenuVersionRegex = new(
         @"(?<![A-Za-z0-9])V0\.6\.3(?![A-Za-z0-9])",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex LocalizationCreditRegex = new(
+        @"Instant[_ ]?Comet\s*汉化",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex ModuleUiTokenRegex = new(
         @"(?<![A-Za-z])(?:INFANTRY REPLENISHMENT SECTION|ANTI-TANK MISSILE|MEDICAL MATERIALS|REPAIR MATERIALS|TURRET TRAVERSE|AMMUNITION REPLENISHMENT|AMMO REPLENISHMENT|ENGINE POWER|REVERSE GEAR|TURN SPEED|ACCELERATION|PROTECTION|COOLDOWN|APPLIQUE|REACTIVE|DURATION|TORQUE|RANGE|TYPE)(?![A-Za-z])",
@@ -2388,7 +2391,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static string AppendMainMenuVersionCredit(string value)
     {
         if (!string.Equals(ActiveSceneName, MainMenuSceneName, StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("InstantComet", StringComparison.OrdinalIgnoreCase))
+            LocalizationCreditRegex.IsMatch(value))
             return value;
 
         var match = MainMenuVersionRegex.Match(value);

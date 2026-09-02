@@ -128,6 +128,7 @@
 8% optics improvement.=光学性能提高 8%。
 8-MAN DISMOUNT=8人制下车步兵
 80mm APHE=80mm APHE
+<b>engine power</b>\nturn speed\nreverse gear\nacceleration\ntorque\nturret traverse=<b>发动机功率</b>\n转向速度\n倒车挡\n加速度\n扭矩\n炮塔转速
 <color\=green>game control</color>=<color=green>游戏控制</color>
 <color\=green>highlight</color>=<color=green>高亮</color>
 <color\=green>More detailed capabilities</color> are on the right.=<color=green>更详细的能力信息</color>位于右侧。
@@ -391,6 +392,7 @@ Armor keeps your crew alive.\nExternal armor modules increase your protection bu
 Armor Lance=装甲装骑分队
 Armor material also contributes to its strength. The armory will note what material a unit's armor is made from.=装甲材质也会影响其防护强度。军械库会标明单位的装甲材质。
 armor type=装甲类型
+armor type\nprotection=装甲类型\n防护
 Armor will degrade when penetrated, which reduces its effectiveness. Try to avoid further hits on that side. The degree of damage is shown on the right during combat when hovering over a unit.=装甲被击穿后会劣化，降低防护效果。尽量避免该侧再次中弹。战斗中将鼠标悬停在单位上时，右侧会显示损伤程度。
 ARMOR=装甲
 armor=装甲
@@ -769,6 +771,7 @@ convoy and escort (bloc)=车队与护卫（"集团"）
 convoy interception=车队拦截
 Convoy=车队
 COOLDOWN=冷却时间
+cooldown\nrange\npersist time\n=冷却时间\n射程\n持续时间\n
 Copyright (c) 2011 by Vernon Adams. All rights reserved.=版权所有 (c) 2011 Vernon Adams。保留所有权利。
 Copyright (c) 2011 by vernon adams. All rights reserved.=版权所有 (c) 2011 Vernon Adams。保留所有权利。
 Copyright (c) 2012 Red Hat, Inc.=版权所有 (c) 2012 Red Hat, Inc.
@@ -1716,6 +1719,7 @@ polis vasile=瓦西列城
 popping smoke.=释放烟幕。
 port iscra=伊斯克拉港
 power station ruins=发电站废墟
+power\nrange\nadvanced\nsignature add.=功率\n射程\n高级\n信号特征加成
 PREFERS TO FIGHT FROM THE REAR, BUT ALWAYS REMAINS COMPOSED IN THE HEAT OF BATTLE.=她更习惯从后方统筹战局，即使置身最炽烈的战火之中，也从未失去从容。
 Press <color\=orange>B</color> to activate a smoke module on a unit. Smoke usually fires towards where the turret is pointing.=按 <color=orange>B</color> 激活单位上的烟幕模块。烟幕通常会向炮塔所指方向发射。
 Press <color\=orange>B</color> to activate a smoke module on a unit. Smoke usually fires towards where the turret is pointing.\nSmoke takes time to reload.=按 <color=orange>B</color> 激活单位上的烟幕模块。烟幕通常会向炮塔所指方向发射。\n烟幕重新装填需要时间。
@@ -1750,6 +1754,8 @@ RANKING OFFICER FOLLOWING THE BETRAYAL.=军衔最高的军官。
 re-open briefing:=重新打开简报：
 RE-OPEN BRIEFING=再次打开任务简报
 REACTIVE=反应式
+reactive\n1=反应式\n1
+reactive\n3=反应式\n3
 Rear Guard Lieutenant: Also, what's the status of the convoy? Our losses are crippling, I request we retreat immediately.=还有，车队情况怎么样？我们的损失已经惨重到难以承受，我请求立即撤退。
 Rear Guard Lieutenant: This is the rear guard, what took you mercenaries so long? A single lance is our relief force?=这里是后卫部队。你们这些佣兵怎么这么久才到？援军就只有一个装骑分队？
 Rear Guard Lieutenant: This is the rear guard, what took you mercenaries so long? A single lance is our relief force?\nRear Guard Lieutenant: Also, what's the status of the convoy? Our losses are crippling, I request we retreat immediately.\n<<Act Aspera normal 1>>\nAspera: Lieutenant, our combined forces will continue to repel the enemies. Your command authorization has been revoked and transfered to our commander. Dismissed, back to your position.\nRear Guard Lieutenant: We're screwed.\nAspera: Commander, we've made contact with the remaining rear guard units. The situation is dire, confrontation with hostile heavy armor is inevitable. Watch out for infantry assaults from buildings.\n<<ClearAct>>=这里是后卫部队。你们这些佣兵怎么这么久才到？援军就只有一个装骑分队？\n另外，车队情况如何？我们的损失太惨重了，我请求立即撤退。\n<<Act Aspera normal 1>>\n中尉，我们的联合部队会继续击退敌人。你的指挥授权已被撤销，并移交给我们的指挥官。解散，回到你的位置。\n我们完蛋了。\n指挥官，我们已与剩余的后卫部队取得联系。情况不容乐观，与敌方重型装甲部队的冲突不可避免。小心来自建筑物的步兵突袭。\n<<ClearAct>>
@@ -2400,6 +2406,7 @@ Type 2 Group=2 型编组
 Type 4 Group=4 型编组
 Type 6 Group=6 型编组
 TYPE=类型
+type=类型
 UI Camera=UI 镜头
 UI=界面
 Unalerted enemy units will take extra suppression when attacked, and require some time to become combat-ready. However, alerted units will alert other units in their squad.=未警戒的敌方单位遭到攻击时会承受额外压制，并需要一段时间进入战斗状态。但已警戒单位会向同一小队的其他单位示警。

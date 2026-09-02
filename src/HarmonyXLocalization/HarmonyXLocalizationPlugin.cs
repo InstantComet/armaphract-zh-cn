@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.85";
+    public const string Version = "1.9.95";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -363,11 +363,14 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private const float MotorPoolTitleFontScale = 0.64f;
     private const float MotorPoolTitleDownShiftScale = 0f;
     private const float UnitCardNameFontScale = 0.58f;
-    private const float CrewManagementSectionTitleFontScale = 0.70f;
+    private const float CrewManagementSectionTitleFontScale = 18f / 28f;
     private const string AsperaNameVerticalOffsetTag = "<voffset=-7px>";
     private const string ContractTitleVerticalOffsetTag = "<voffset=-5px>";
     private const string MotorPoolTitleVerticalOffsetTag = "<voffset=-6px>";
+    private const string CrewManagementNameTitleVerticalOffsetTag = "<voffset=-8px>";
     private const string ObjectiveTitleVerticalOffsetTag = "<voffset=-3px>";
+    private const string CrewManagementNameTitlePath =
+        "CamSystem/Main Camera/Canvas/UnitUI/Crew/CrewUI/crewmemberPanel/CrewData/name";
     private const string ContractDetailLabelLineHeightTag = "<line-height=95%>";
     private const string MainMenuSceneName = "0StartView";
     private static readonly HashSet<GUIStyle> ActiveManualGuideStyles = new();
@@ -2151,6 +2154,13 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                 plain.Equals("单位库", StringComparison.Ordinal));
     }
 
+    private static bool IsCrewManagementNameTitleTarget(Component component)
+    {
+        return BuildTransformPath(component.transform).Equals(
+            CrewManagementNameTitlePath,
+            StringComparison.Ordinal);
+    }
+
     private static bool TryGetCompactTitleVerticalOffsetTag(
         Component component,
         string text,
@@ -2176,6 +2186,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             return true;
         }
 
+        if (IsCrewManagementNameTitleTarget(component))
+        {
+            offsetTag = CrewManagementNameTitleVerticalOffsetTag;
+            return true;
+        }
+
         offsetTag = string.Empty;
         return false;
     }
@@ -2185,6 +2201,19 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         return value.Contains("<voffset", StringComparison.OrdinalIgnoreCase)
             ? value
             : $"{offsetTag}{value}</voffset>";
+    }
+
+    private static string ApplyCompactTitleFormatting(
+        Component component,
+        string value,
+        string offsetTag)
+    {
+        if (!IsCrewManagementNameTitleTarget(component))
+            return ApplyCompactTitleVerticalOffset(value, offsetTag);
+
+        if (value.Contains("<voffset", StringComparison.OrdinalIgnoreCase))
+            return value;
+        return $"{offsetTag}<b>{value}</b></voffset>";
     }
 
     private static bool IsContractDetailLabelText(string text)
@@ -2367,7 +2396,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             translated = ApplyContextLayout(component, source, mapped);
         else if (component is TMP_Text &&
                  TryGetCompactTitleVerticalOffsetTag(component, source, out var offsetTag))
-            translated = ApplyCompactTitleVerticalOffset(source, offsetTag);
+            translated = ApplyCompactTitleFormatting(component, source, offsetTag);
 
         ApplyPauseMenuButtonFontLayout(component, source);
         translated = ApplyContractDangerValueTranslation(translated);
@@ -2503,7 +2532,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             return ApplyCompactTitleVerticalOffset(translated, ObjectiveTitleVerticalOffsetTag);
         if (component is TMP_Text &&
             TryGetCompactTitleVerticalOffsetTag(component, plainSource, out var offsetTag))
-            return ApplyCompactTitleVerticalOffset(translated, offsetTag);
+            return ApplyCompactTitleFormatting(component, translated, offsetTag);
         if (string.Equals(plainSource, "UI", StringComparison.OrdinalIgnoreCase))
         {
             var soundUi = IsSoundSettingsUi(component, out var uiPath, out var uiY);
@@ -2969,24 +2998,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static void ApplyCrewManagementSectionTitleFontLayout(Component component, string value)
     {
-        var plain = PlainText(value).Trim();
-        var isRequestedTitle =
-            plain.Equals("ARMAPHRACT", StringComparison.OrdinalIgnoreCase) ||
-            plain.Equals("装甲重骑", StringComparison.Ordinal) ||
-            plain.Equals("Merc Grunt", StringComparison.OrdinalIgnoreCase) ||
-            plain.Equals("佣兵士兵", StringComparison.Ordinal);
-        if (!isRequestedTitle || !IsCampaignScene())
-            return;
-
-        // These names also occur on small crew cards. Only resize the large
-        // yellow section headers shown in the crew-management panel.
-        var isLargeHeader = component switch
-        {
-            TMP_Text tmp => tmp.fontSize >= 20f,
-            LegacyText legacy => legacy.fontSize >= 20,
-            _ => false
-        };
-        if (!isLargeHeader)
+        var path = BuildTransformPath(component.transform);
+        var isConfirmedCrewNameTitle = path.Equals(CrewManagementNameTitlePath, StringComparison.Ordinal);
+        var isConfirmedArmaphractTitle = path.Equals(
+            "UI/Canvas/CampaignUI/TAB: Crew/CrewUI/Armaphract/Text (TMP) (1)",
+            StringComparison.Ordinal);
+        if (!isConfirmedCrewNameTitle && !isConfirmedArmaphractTitle)
             return;
 
         ApplyCompactFontLayout(

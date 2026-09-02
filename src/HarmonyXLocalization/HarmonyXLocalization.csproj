@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <AssemblyName>Armaphract.HarmonyXLocalization</AssemblyName>
-    <Version>1.9.85</Version>
+    <Version>1.9.95</Version>
     <GameDir Condition="'$(GameDir)' == ''">$(MSBuildThisFileDirectory)..\..</GameDir>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

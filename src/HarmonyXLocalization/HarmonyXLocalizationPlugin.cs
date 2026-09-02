@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.74";
+    public const string Version = "1.9.76";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -337,10 +337,11 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private const float UnitActionButtonFontScale = 0.72f;
     private const float UnitActionButtonDownShiftScale = 0.07f;
     private const float MotorPoolTitleFontScale = 0.64f;
-    private const float MotorPoolTitleDownShiftScale = 0.15f;
+    private const float MotorPoolTitleDownShiftScale = 0f;
     private const float UnitCardNameFontScale = 0.58f;
     private const string AsperaNameVerticalOffsetTag = "<voffset=-7px>";
     private const string ContractTitleVerticalOffsetTag = "<voffset=-5px>";
+    private const string MotorPoolTitleVerticalOffsetTag = "<voffset=-6px>";
     private const string ContractDetailLabelLineHeightTag = "<line-height=95%>";
     private const string MainMenuSceneName = "0StartView";
     private static readonly HashSet<GUIStyle> ActiveManualGuideStyles = new();
@@ -2113,6 +2114,14 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                 plain.Equals("阿斯佩拉", StringComparison.Ordinal));
     }
 
+    private static bool IsMotorPoolTitleLayoutTarget(Component component, string text)
+    {
+        var plain = PlainText(text);
+        return component.name.Equals("motorpool title", StringComparison.OrdinalIgnoreCase) &&
+               (plain.Equals("MOTOR POOL", StringComparison.OrdinalIgnoreCase) ||
+                plain.Equals("单位库", StringComparison.Ordinal));
+    }
+
     private static bool TryGetCompactTitleVerticalOffsetTag(
         Component component,
         string text,
@@ -2129,6 +2138,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         if (isContractTitle)
         {
             offsetTag = ContractTitleVerticalOffsetTag;
+            return true;
+        }
+
+        if (IsMotorPoolTitleLayoutTarget(component, plain))
+        {
+            offsetTag = MotorPoolTitleVerticalOffsetTag;
             return true;
         }
 
@@ -2871,9 +2886,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static void ApplyMotorPoolTitleFontLayout(Component component, string value)
     {
-        var plain = PlainText(value);
-        if (!plain.Equals("MOTOR POOL", StringComparison.OrdinalIgnoreCase) &&
-            !plain.Equals("单位库", StringComparison.Ordinal))
+        if (!IsMotorPoolTitleLayoutTarget(component, value))
             return;
 
         ApplyCompactFontLayout(

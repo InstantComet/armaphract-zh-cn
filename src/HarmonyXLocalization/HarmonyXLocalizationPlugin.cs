@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.71";
+    public const string Version = "1.9.73";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -166,7 +166,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         @"(?<![A-Za-z])HIGH(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ContractMediumValueRegex = new(
-        @"(?<![A-Za-z])MEDIUM(?![A-Za-z])",
+        @"(?<![A-Za-z])(?:MEDIUM|MED)(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ContractLowValueRegex = new(
         @"(?<![A-Za-z])LOW(?![A-Za-z])",
@@ -1175,10 +1175,10 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             }
         }
 
-        if (!source.Contains("LOW", StringComparison.Ordinal) &&
-            !source.Contains("MEDIUM", StringComparison.Ordinal) &&
-            !source.Contains("HIGH", StringComparison.Ordinal) &&
-            !source.Contains("EXTREME", StringComparison.Ordinal))
+        if (!ContractLowValueRegex.IsMatch(source) &&
+            !ContractMediumValueRegex.IsMatch(source) &&
+            !ContractHighValueRegex.IsMatch(source) &&
+            !ContractExtremeValueRegex.IsMatch(source))
             return;
 
         var translated = ContractExtremeValueRegex.Replace(source, "极高");
@@ -1675,6 +1675,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static void TranslateStatusOverlayTmpText(TMP_Text text)
     {
+        // ManageScreenStatuses uses TMP's formatted native writer. That writer
+        // updates the pending input immediately, but GetParsedText otherwise
+        // still exposes the previous frame's mesh. Synchronize this one known
+        // status component at the producer boundary before reading it; without
+        // this, English and Chinese become an every-other-frame ping-pong.
+        text.ForceMeshUpdate(false, false);
         var current = text.text;
         var source = current;
 
@@ -1723,8 +1729,37 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             return;
         }
 
+        translated = ApplyRenderedStatusLineColors(text, translated);
         LogCampaignDynamicTargetOnce("status-buffer", text, PlainText(source), PlainText(translated));
         SetComponentText(text, sourceWithPlaceholders, translated);
+    }
+
+    private static string ApplyRenderedStatusLineColors(TMP_Text text, string translated)
+    {
+        var normalized = translated.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var lines = normalized.Split('\n');
+        var textInfo = text.textInfo;
+        if (textInfo == null || textInfo.lineCount <= 0 || lines.Length == 0)
+            return translated;
+
+        var lineCount = Mathf.Min(lines.Length, textInfo.lineCount);
+        for (var lineIndex = 0; lineIndex < lineCount; lineIndex++)
+        {
+            if (lines[lineIndex].Length == 0)
+                continue;
+
+            var lineInfo = textInfo.lineInfo[lineIndex];
+            if (lineInfo.visibleCharacterCount <= 0)
+                continue;
+            var characterIndex = lineInfo.firstVisibleCharacterIndex;
+            if (characterIndex < 0 || characterIndex >= textInfo.characterCount)
+                continue;
+
+            var color = textInfo.characterInfo[characterIndex].color;
+            var colorHex = ColorUtility.ToHtmlStringRGBA(color);
+            lines[lineIndex] = $"<color=#{colorHex}>{lines[lineIndex]}</color>";
+        }
+        return string.Join("\n", lines);
     }
 
     private static void LogStatusOverlaySourceChange(TMP_Text text, string source)

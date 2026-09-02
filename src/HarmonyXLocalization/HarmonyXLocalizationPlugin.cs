@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.63";
+    public const string Version = "1.9.71";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -48,27 +48,24 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Dictionary<int, TextAlignment> OptionsMenuTextMeshAlignments = new();
     private static readonly Dictionary<int, TextMeshFontLayoutState> MenuTextMeshFontStates = new();
     private static readonly Dictionary<int, PanelTitleLayoutState> PanelTitleLayoutStates = new();
-    private static readonly Dictionary<int, Component> PanelTitleComponents = new();
-    private static readonly List<Component> CachedCampaignDayTexts = new();
-    private static readonly List<TMP_Text> CachedDistrictDateLabels = new();
-    private static readonly List<TMP_Text> CachedDistrictDateNumbers = new();
+    private static readonly Dictionary<int, PanelTitleLayoutState> UnitActionButtonLayoutStates = new();
+    private static readonly Dictionary<int, FontLayoutState> MotorPoolTitleFontStates = new();
+    private static readonly Dictionary<int, FontLayoutState> UnitCardNameFontStates = new();
+    private static readonly Dictionary<int, Vector2> MotorPoolTitlePositions = new();
+    private static readonly HashSet<int> ModuleDetailTextLoggedIds = new();
     private static TMP_Text? CachedContractDetailText;
-    private static readonly List<Component> CachedPauseMenuButtonTexts = new();
     private static readonly Dictionary<int, StatusOverlayTexts> StatusOverlayTextCache = new();
     private static readonly Queue<int> StatusOverlayTextCacheOrder = new();
     private static readonly HashSet<int> StatusOverlayComponentIds = new();
     private static readonly Dictionary<int, string> LastStatusOverlaySources = new();
     private static readonly Dictionary<int, string> LastProcessedTexts = new();
-    // Setting TMP_Text.text from the fallback scanner re-enters the patched
+    // Setting TMP_Text.text from a one-shot scene translation re-enters the patched
     // setter.  Keep that write out of the translation pipeline; otherwise a
     // producer can race the scanner and make the same control alternate
     // between the source and a partially translated value.
     private static readonly HashSet<int> InternalTextWrites = new();
     private static readonly Dictionary<string, string> TranslationCache = new(StringComparer.Ordinal);
     private static readonly Queue<string> TranslationCacheOrder = new();
-    private static readonly Dictionary<int, PendingPanelScan> PendingPanelScans = new();
-    private static readonly List<int> PendingPanelScanIds = new();
-    private static readonly List<int> PanelTitleComponentIds = new();
     private static readonly HashSet<int> FrontLayoutLoggedIds = new();
     private static readonly HashSet<int> UiContextLoggedIds = new();
     private static readonly HashSet<int> ExitContextLoggedIds = new();
@@ -150,6 +147,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Regex JammerStatusTokenRegex = new(
         @"(?<![A-Za-z])JAMMER(?=\s+(?:BROKEN|损坏)(?![A-Za-z]))",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex SmokeStatusTokenRegex = new(
+        @"(?<![A-Za-z])SMOKE(?=\s+(?:BROKEN|损坏)(?![A-Za-z]))",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex PartiallyTranslatedSmokeStatusRegex = new(
+        @"烟幕(?=\s+(?:BROKEN|损坏)(?![A-Za-z]))",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ChineseCharacterRegex = new(
         @"[\u3400-\u9fff]",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -181,11 +184,14 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         @"(?<![A-Za-z0-9])V0\.6\.3(?![A-Za-z0-9])",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex ModuleUiTokenRegex = new(
-        @"(?<![A-Za-z])(?:INFANTRY REPLENISHMENT SECTION|ANTI-TANK MISSILE|MEDICAL MATERIALS|REPAIR MATERIALS|TURRET TRAVERSE|AMMUNITION REPLENISHMENT|AMMO REPLENISHMENT|ENGINE POWER|REVERSE GEAR|TURN SPEED|ACCELERATION|PROTECTION|COOLDOWN|APPLIQUE|DURATION|TORQUE|RANGE|TYPE)(?![A-Za-z])",
+        @"(?<![A-Za-z])(?:INFANTRY REPLENISHMENT SECTION|ANTI-TANK MISSILE|MEDICAL MATERIALS|REPAIR MATERIALS|TURRET TRAVERSE|AMMUNITION REPLENISHMENT|AMMO REPLENISHMENT|ENGINE POWER|REVERSE GEAR|TURN SPEED|ACCELERATION|PROTECTION|COOLDOWN|APPLIQUE|REACTIVE|DURATION|TORQUE|RANGE|TYPE)(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ReplenishmentClassTokenRegex = new(
         @"(?<![A-Za-z])(?:LIGHT|HEAVY|ADVANCED)(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex DismountCountTokenRegex = new(
+        @"(?<![A-Za-z0-9])(?<count>\d+)-MAN\s+DISMOUNT(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly HashSet<string> ExactUiOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "COMMAND", "DRIVER", "GUNNER", "LOADER",
@@ -223,6 +229,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ["PROTECTION"] = "防护",
         ["COOLDOWN"] = "冷却时间",
         ["APPLIQUE"] = "附加式",
+        ["REACTIVE"] = "反应式",
         ["DURATION"] = "持续时间",
         ["TORQUE"] = "扭矩",
         ["RANGE"] = "射程",
@@ -254,21 +261,14 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ["炮塔转速ERSE"] = "炮塔转速"
     };
     private static DateTime MappingTimestampUtc;
-    private static DateTime NextMappingCheckUtc;
     private static bool MappingsLoaded;
-    private static readonly TimeSpan MappingCheckInterval = TimeSpan.FromSeconds(1);
+    private static FileSystemWatcher? MappingWatcher;
+    private static volatile bool MappingReloadRequested;
     private static bool TranslationsEnabled = true;
     private static bool PanelActivationTranslationInProgress;
     private static bool SceneScanRequested;
-    private static int PendingGlobalScanFrames;
-    private static float NextPanelTitleLayoutEnforceTime;
-    private static float NextTargetedDynamicTextEnforceTime;
-    private static bool TargetedUiComponentsCached;
     private static string ActiveSceneName = string.Empty;
-    private const int DelayedPanelScanFrames = 8;
     private const int TranslationCacheCapacity = 8192;
-    private const float PanelTitleLayoutEnforceInterval = 0.25f;
-    private const float TargetedDynamicTextEnforceInterval = 0.1f;
     private const float OptionsMenuFontScale = 1.10f;
     private const float MissionListFontSize = 16f;
     private static readonly HashSet<string> ObjectiveTitles = new(StringComparer.OrdinalIgnoreCase)
@@ -331,6 +331,11 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private const float MenuCommandButtonFontSize = 15f;
     private const float CampaignPanelTitleFontScale = 0.72f;
     private const float CampaignPanelTitleDownShiftScale = 0.07f;
+    private const float UnitActionButtonFontScale = 0.72f;
+    private const float UnitActionButtonDownShiftScale = 0.07f;
+    private const float MotorPoolTitleFontScale = 0.64f;
+    private const float MotorPoolTitleDownShiftScale = 0.15f;
+    private const float UnitCardNameFontScale = 0.58f;
     private const string AsperaNameVerticalOffsetTag = "<voffset=-7px>";
     private const string ContractTitleVerticalOffsetTag = "<voffset=-5px>";
     private const string ContractDetailLabelLineHeightTag = "<line-height=95%>";
@@ -359,6 +364,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         Logger = Log;
         ActiveSceneName = SceneManager.GetActiveScene().name;
         ReloadMappingsIfChanged(force: true);
+        StartMappingWatcher();
         var harmony = new Harmony(Guid);
         harmony.Patch(
             AccessTools.PropertySetter(typeof(TMP_Text), nameof(TMP_Text.text)),
@@ -374,6 +380,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         PatchPauseMenu(harmony);
         PatchOptionsMenu(harmony);
         PatchCampaignMissionData(harmony);
+        PatchUnitCardLayout(harmony);
+        PatchArmoryModuleData(harmony);
+        PatchInventoryModuleData(harmony);
         PatchSceneLoaded(harmony);
         PatchCombatChatter(harmony);
         PatchUnitStatusWriters(harmony);
@@ -662,7 +671,11 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             nameof(CampaignUIManager.SetupAlldataMissionNode),
             new[] { typeof(MissionNode) },
             nameof(CampaignMissionListNodePostfix));
-
+        PatchCampaignUiMethod(
+            harmony,
+            nameof(CampaignUIManager.LateUpdate),
+            Type.EmptyTypes,
+            nameof(CampaignLateUpdatePostfix));
     }
 
     private static void PatchCampaignUiMethod(
@@ -684,6 +697,240 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         Logger?.LogInfo($"Patched CampaignUIManager.{methodName} for targeted campaign UI translation.");
     }
 
+    private static void PatchUnitCardLayout(Harmony harmony)
+    {
+        var initializeMethod = AccessTools.Method(
+            typeof(UICardInstanceButton), nameof(UICardInstanceButton.Initialize));
+        if (initializeMethod == null)
+        {
+            Logger?.LogWarning("Could not find UICardInstanceButton.Initialize for unit-card name layout.");
+        }
+        else
+        {
+            harmony.Patch(
+                initializeMethod,
+                postfix: new HarmonyMethod(
+                    typeof(HarmonyXLocalizationPlugin), nameof(UnitCardInitializePostfix)));
+        }
+
+        var finalCardMethod = AccessTools.Method(
+            typeof(ArmoryManager), nameof(ArmoryManager.UnitCardSet),
+            new[] { typeof(UICardInstanceButton), typeof(UnitInstance), typeof(bool) });
+        if (finalCardMethod == null)
+        {
+            Logger?.LogWarning("Could not find ArmoryManager.UnitCardSet for final unit-card layout.");
+        }
+        else
+        {
+            harmony.Patch(
+                finalCardMethod,
+                postfix: new HarmonyMethod(
+                    typeof(HarmonyXLocalizationPlugin), nameof(ArmoryUnitCardSetPostfix)));
+        }
+
+        var loadArmoryMethod = AccessTools.Method(
+            typeof(ArmoryManager), nameof(ArmoryManager.LoadArmory), Type.EmptyTypes);
+        if (loadArmoryMethod == null)
+        {
+            Logger?.LogWarning("Could not find ArmoryManager.LoadArmory for final unit-library title layout.");
+        }
+        else
+        {
+            harmony.Patch(
+                loadArmoryMethod,
+                postfix: new HarmonyMethod(
+                    typeof(HarmonyXLocalizationPlugin), nameof(ArmoryLoadPostfix)));
+        }
+        Logger?.LogInfo(
+            "Patched armory load and unit-card population events for compact unit-library text.");
+    }
+
+    private static void UnitCardInitializePostfix(UICardInstanceButton __instance)
+    {
+        if (!TranslationsEnabled || __instance?.texts == null)
+            return;
+
+        foreach (var text in __instance.texts)
+        {
+            if (text == null)
+                continue;
+            TranslateCurrentComponent(text);
+            ApplyUnitCardNameFontLayout(text, text.text);
+        }
+    }
+
+    private static void ArmoryUnitCardSetPostfix(UICardInstanceButton __0)
+    {
+        if (!TranslationsEnabled || __0 == null)
+            return;
+
+        // UnitCardSet creates and fills crewMiniNew after Initialize has
+        // returned. Apply the layout at that final producer boundary so the
+        // game cannot overwrite it later; no periodic layout enforcement is
+        // needed.
+        foreach (var text in __0.gameObject.GetComponentsInChildren<TMP_Text>(true))
+        {
+            TranslateCurrentComponent(text);
+            ApplyUnitCardNameFontLayout(text, text.text);
+        }
+        foreach (var text in __0.gameObject.GetComponentsInChildren<LegacyText>(true))
+        {
+            TranslateCurrentComponent(text);
+            ApplyUnitCardNameFontLayout(text, text.text);
+        }
+    }
+
+    private static void ArmoryLoadPostfix(ArmoryManager __instance)
+    {
+        if (!TranslationsEnabled || __instance == null)
+            return;
+
+        // LoadArmory is the final synchronous setup event for the library
+        // heading. Re-run the normal translation/layout pipeline once here in
+        // case Start or prefab setup restored its original metrics.
+        TranslateHierarchy(__instance.gameObject);
+    }
+
+    private static void PatchArmoryModuleData(Harmony harmony)
+    {
+        var method = AccessTools.Method(
+            typeof(ArmoryModule), nameof(ArmoryModule.DisplayModuleData),
+            new[] { typeof(UnitModule) });
+        if (method == null)
+        {
+            Logger?.LogWarning("Could not find ArmoryModule.DisplayModuleData for module-detail localization.");
+            return;
+        }
+
+        harmony.Patch(
+            method,
+            postfix: new HarmonyMethod(
+                typeof(HarmonyXLocalizationPlugin), nameof(ArmoryModuleDataPostfix)));
+        Logger?.LogInfo("Patched ArmoryModule.DisplayModuleData for complete dynamic module-detail localization.");
+    }
+
+    private static void ArmoryModuleDataPostfix(ArmoryModule __instance)
+    {
+        if (!TranslationsEnabled || __instance?.moduleData == null)
+            return;
+        TranslateUiParamObject(__instance.moduleData, 0);
+    }
+
+    private static void PatchInventoryModuleData(Harmony harmony)
+    {
+        var postfix = new HarmonyMethod(
+            typeof(HarmonyXLocalizationPlugin), nameof(InventoryModuleDataPostfix));
+        var patched = 0;
+        foreach (var method in new[]
+                 {
+                     AccessTools.Method(
+                         typeof(InventoryItemModule), nameof(InventoryItemModule.SetModule),
+                         new[] { typeof(UnitModule), typeof(float) }),
+                     AccessTools.Method(
+                         typeof(InventoryItemModule), nameof(InventoryItemModule.SetModuleInstance),
+                         new[] { typeof(ModuleInstance), typeof(float) })
+                 })
+        {
+            if (method == null)
+                continue;
+            harmony.Patch(method, postfix: postfix);
+            patched++;
+        }
+        Logger?.LogInfo(
+            $"Patched {patched} InventoryItemModule setup methods for module-card detail localization.");
+    }
+
+    private static void InventoryModuleDataPostfix(InventoryItemModule __instance)
+    {
+        if (!TranslationsEnabled || __instance?.uiParams == null)
+            return;
+        TranslateUiParamObject(__instance.uiParams, 0);
+    }
+
+    private static void TranslateUiParamObject(UIParamObject ui, int depth)
+    {
+        TranslateUiParamObject(ui, depth, ContainsReplenishmentModuleUi(ui, depth));
+    }
+
+    private static void TranslateUiParamObject(
+        UIParamObject ui,
+        int depth,
+        bool replenishmentContext)
+    {
+        if (ui == null || depth > 4)
+            return;
+
+        if (ui.texts != null)
+        {
+            foreach (var text in ui.texts)
+            {
+                if (text == null)
+                    continue;
+                var beforeTranslation = text.text;
+                var isCandidate = IsModuleDetailTextCandidate(beforeTranslation);
+                if (isCandidate && ModuleDetailTextLoggedIds.Add(text.GetInstanceID()))
+                {
+                    Logger?.LogInfo(
+                        $"Module detail text captured: text={PlainText(beforeTranslation)}, path={BuildTransformPath(text.transform)}");
+                }
+                if (replenishmentContext &&
+                    ReplenishmentClassTranslations.TryGetValue(
+                        PlainText(beforeTranslation), out var translatedClass))
+                {
+                    SetComponentText(text, beforeTranslation, translatedClass);
+                }
+                else
+                {
+                    TranslateCurrentComponent(text);
+                }
+            }
+        }
+        if (ui.uiParamObjects == null)
+            return;
+        foreach (var child in ui.uiParamObjects)
+            TranslateUiParamObject(child, depth + 1, replenishmentContext);
+    }
+
+    private static bool ContainsReplenishmentModuleUi(UIParamObject ui, int depth)
+    {
+        if (ui == null || depth > 4)
+            return false;
+        if (ui.texts != null)
+        {
+            foreach (var text in ui.texts)
+            {
+                if (text == null)
+                    continue;
+                var plain = PlainText(text.text);
+                if (plain.Contains("MEDICAL MATERIALS", StringComparison.Ordinal) ||
+                    plain.Contains("REPAIR MATERIALS", StringComparison.Ordinal) ||
+                    plain.Contains("医疗物资", StringComparison.Ordinal) ||
+                    plain.Contains("维修物资", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+        if (ui.uiParamObjects == null)
+            return false;
+        foreach (var child in ui.uiParamObjects)
+        {
+            if (ContainsReplenishmentModuleUi(child, depth + 1))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool IsModuleDetailTextCandidate(string value)
+    {
+        if (ModuleUiTokenRegex.IsMatch(value) || DismountCountTokenRegex.IsMatch(value))
+            return true;
+        return ReplenishmentClassTokenRegex.IsMatch(value) &&
+               (value.Contains("医疗物资", StringComparison.Ordinal) ||
+                value.Contains("维修物资", StringComparison.Ordinal) ||
+                value.Contains("弹药补给", StringComparison.Ordinal));
+    }
+
     private static void CampaignTimePostfix(CampaignUIManager __instance)
     {
         if (!TranslationsEnabled || __instance == null)
@@ -695,6 +942,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         TranslateCampaignDayCounters(__instance.zoomedOutUI?.gameObject);
         TranslateCampaignDayCounters(__instance.zoomedInUI?.gameObject);
         TranslateCampaignDayCounters(__instance.actions?.gameObject);
+        TranslateDistrictDateFormat(__instance.districtUI);
     }
 
     private static void CampaignMissionDataPostfix(CampaignUIManager __instance)
@@ -720,6 +968,19 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
         foreach (var text in __instance.allMissionData.gameObject.GetComponentsInChildren<TMP_Text>(true))
             ApplyMissionListTextFont(text);
+    }
+
+    private static void CampaignLateUpdatePostfix(CampaignUIManager __instance)
+    {
+        if (!TranslationsEnabled || __instance == null || CachedContractDetailText == null)
+            return;
+
+        // CampaignUIManager.LateUpdate is the native producer that formats the
+        // live danger value directly into TMP's rendered buffer. Translate at
+        // that exact write boundary rather than polling from our own Update.
+        var text = CachedContractDetailText;
+        if (text != null && text.gameObject.activeInHierarchy)
+            TranslateContractDangerValue(text, text.text);
     }
 
     private static void ApplyMissionListTextFont(TMP_Text? text)
@@ -792,7 +1053,6 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ActiveSceneName = SceneManager.GetActiveScene().name;
         ClearSceneState();
         SceneScanRequested = true;
-        PendingGlobalScanFrames = 2;
         Logger?.LogInfo($"Scene loaded: {ActiveSceneName}");
     }
 
@@ -803,19 +1063,13 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             !IsLikelyUiActivation(__instance.transform))
             return;
         PanelActivationTranslationInProgress = true;
-        var hasText = false;
         try
         {
-            hasText = TranslateHierarchy(__instance);
+            TranslateHierarchy(__instance);
         }
         finally
         {
             PanelActivationTranslationInProgress = false;
-        }
-        if (hasText)
-        {
-            var instanceId = __instance.GetInstanceID();
-            PendingPanelScans[instanceId] = new PendingPanelScan(__instance, DelayedPanelScanFrames);
         }
     }
 
@@ -966,57 +1220,6 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         return string.Join("/", names);
     }
 
-    private static void CacheTargetedUiComponents()
-    {
-        if (TargetedUiComponentsCached)
-            return;
-
-        TargetedUiComponentsCached = true;
-        CachedCampaignDayTexts.Clear();
-        CachedDistrictDateLabels.Clear();
-        CachedDistrictDateNumbers.Clear();
-        CachedContractDetailText = null;
-        CachedPauseMenuButtonTexts.Clear();
-
-        // This is the only include-inactive scene lookup. It runs once after a
-        // scene loads; later updates touch only the cached handful of controls.
-        foreach (var text in UnityEngine.Object.FindObjectsByType<TMP_Text>(
-                     FindObjectsInactive.Include,
-                     FindObjectsSortMode.None))
-        {
-            if (IsDistrictDateNumber(text))
-                CachedDistrictDateNumbers.Add(text);
-            else if (IsDistrictDateLabel(text))
-                CachedDistrictDateLabels.Add(text);
-            if (IsCampaignDayTextPath(text))
-                CachedCampaignDayTexts.Add(text);
-            if (IsContractDetailTextPath(text))
-                CachedContractDetailText = text;
-            if (IsPauseMenuButtonTextPath(text))
-                CachedPauseMenuButtonTexts.Add(text);
-        }
-
-        foreach (var component in CachedPauseMenuButtonTexts)
-        {
-            if (component is TMP_Text text)
-                ApplyPauseMenuButtonFontLayout(text, text.text, knownPauseMenuTarget: true);
-        }
-
-        EnforceCachedDynamicTexts();
-        Logger?.LogInfo(
-            $"Cached targeted UI controls: day={CachedCampaignDayTexts.Count}, districtDateLabels={CachedDistrictDateLabels.Count}, districtDateNumbers={CachedDistrictDateNumbers.Count}, contractDetail={(CachedContractDetailText == null ? 0 : 1)}, pauseButtons={CachedPauseMenuButtonTexts.Count}.");
-    }
-
-    private static void EnforceCachedDynamicTexts()
-    {
-        EnforceDistrictDateFormat();
-        foreach (var component in CachedCampaignDayTexts)
-        {
-            if (component is TMP_Text text && text != null)
-                TranslateCampaignDayCounter(text, text.text);
-        }
-    }
-
     private static bool IsDistrictDateNumber(TMP_Text text)
     {
         return text.name.Equals("day", StringComparison.OrdinalIgnoreCase) &&
@@ -1037,20 +1240,21 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                plain.Equals("第", StringComparison.Ordinal);
     }
 
-    private static void EnforceDistrictDateFormat()
+    private static void TranslateDistrictDateFormat(GameObject? root)
     {
-        foreach (var label in CachedDistrictDateLabels)
+        if (root == null)
+            return;
+
+        foreach (var label in root.GetComponentsInChildren<TMP_Text>(true).Where(IsDistrictDateLabel))
         {
-            if (label == null || string.Equals(PlainText(label.text), "第", StringComparison.Ordinal))
+            if (string.Equals(PlainText(label.text), "第", StringComparison.Ordinal))
                 continue;
             SetComponentText(label, label.text, "第");
             LogCampaignDynamicTargetOnce("district-date-label", label, "日：", "第");
         }
 
-        foreach (var number in CachedDistrictDateNumbers)
+        foreach (var number in root.GetComponentsInChildren<TMP_Text>(true).Where(IsDistrictDateNumber))
         {
-            if (number == null)
-                continue;
             var plain = PlainText(number.text);
             var digitCount = CountLeadingDigits(plain);
             if (digitCount == 0)
@@ -1061,13 +1265,6 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             SetComponentText(number, number.text, replacement);
             LogCampaignDynamicTargetOnce("district-date-number", number, plain, replacement);
         }
-    }
-
-    private static bool IsCampaignDayTextPath(Component component)
-    {
-        return component.name.Equals("day", StringComparison.OrdinalIgnoreCase) &&
-               HasAncestorNamed(component.transform, "timerect", 5) &&
-               HasAncestorNamed(component.transform, "ACTIONS", 8);
     }
 
     private static bool IsContractDetailTextPath(Component component)
@@ -1128,22 +1325,18 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         OptionsMenuTextMeshAlignments.Clear();
         MenuTextMeshFontStates.Clear();
         PanelTitleLayoutStates.Clear();
-        PanelTitleComponents.Clear();
-        CachedCampaignDayTexts.Clear();
-        CachedDistrictDateLabels.Clear();
-        CachedDistrictDateNumbers.Clear();
+        UnitActionButtonLayoutStates.Clear();
+        MotorPoolTitleFontStates.Clear();
+        UnitCardNameFontStates.Clear();
+        MotorPoolTitlePositions.Clear();
+        ModuleDetailTextLoggedIds.Clear();
         CachedContractDetailText = null;
-        CachedPauseMenuButtonTexts.Clear();
-        TargetedUiComponentsCached = false;
         StatusOverlayTextCache.Clear();
         StatusOverlayTextCacheOrder.Clear();
         StatusOverlayComponentIds.Clear();
         LastStatusOverlaySources.Clear();
         LastProcessedTexts.Clear();
         InternalTextWrites.Clear();
-        PendingPanelScans.Clear();
-        PendingPanelScanIds.Clear();
-        PanelTitleComponentIds.Clear();
         FrontLayoutLoggedIds.Clear();
         UiContextLoggedIds.Clear();
         ExitContextLoggedIds.Clear();
@@ -1220,6 +1413,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             return;
         ApplyKnownStatusOverlayFontLayout(component, current);
         ApplyKnownCampaignPanelTitleLayout(component, current);
+        ApplyUnitActionButtonLayout(component, current);
+        ApplyMotorPoolTitleFontLayout(component, current);
+        ApplyUnitCardNameFontLayout(component, current);
         // Inactive submenu labels can already have been translated by the
         // initial include-inactive scan.  Apply their layout before the
         // last-value fast path so opening the submenu still enlarges every
@@ -1482,14 +1678,14 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         var current = text.text;
         var source = current;
 
-        // The native status writer can update TMP's rendered character buffer
-        // without updating .text.  This is the same formatted-writer behavior
-        // used by campaign danger values: GetParsedText is the only place that
-        // exposes the actual BLEEDOUT/STUNNED block before the frame is drawn.
+        // The native status writer updates TMP's rendered character buffer
+        // without updating .text. GetParsedText therefore carries both the
+        // newly formatted state and the restored STATUS template used to clear
+        // expired states; ignoring the latter would leave the previous Chinese
+        // status stuck in .text.
         var parsed = text.GetParsedText();
         if (!string.IsNullOrEmpty(parsed) &&
-            !string.Equals(parsed, current, StringComparison.Ordinal) &&
-            !IsScreenStatusTemplateText(parsed))
+            !string.Equals(parsed, current, StringComparison.Ordinal))
         {
             source = parsed;
         }
@@ -1989,6 +2185,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         // translated value, still apply the status-overlay font layout here.
         ApplyKnownStatusOverlayFontLayout(component, value);
         ApplyKnownCampaignPanelTitleLayout(component, value);
+        ApplyUnitActionButtonLayout(component, value);
+        ApplyMotorPoolTitleFontLayout(component, value);
+        ApplyUnitCardNameFontLayout(component, value);
         ApplyPauseMenuButtonFontLayout(component, value);
         if (IsOptionsLeftLabel(value))
             RegisterAndApplyOptionsMenuFont(component);
@@ -2210,6 +2409,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ApplyManualPauseFontLayout(component, plainSource);
         ApplyObjectiveFontLayout(component, plainSource);
         ApplyCampaignPanelTitleLayout(component, plainSource);
+        ApplyUnitActionButtonLayout(component, plainSource);
+        ApplyMotorPoolTitleFontLayout(component, plainSource);
+        ApplyUnitCardNameFontLayout(component, translated);
         if (component is TMP_Text &&
             TryGetCompactTitleVerticalOffsetTag(component, plainSource, out var offsetTag))
             return ApplyCompactTitleVerticalOffset(translated, offsetTag);
@@ -2514,7 +2716,6 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             return;
 
         var instanceId = component.GetInstanceID();
-        PanelTitleComponents[instanceId] = component;
         if (PanelTitleContextLoggedIds.Add(instanceId))
             Logger?.LogInfo($"Campaign panel title layout: text={plainSource}, object={component.name}");
         if (component is TMP_Text tmp)
@@ -2562,6 +2763,165 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             textMesh.characterSize = state.TextMeshCharacterSize!.Value * CampaignPanelTitleFontScale;
             textMesh.transform.localPosition = state.LocalPosition!.Value +
                                                Vector3.down * state.TextMeshCharacterSize.Value * CampaignPanelTitleDownShiftScale;
+        }
+    }
+
+    private static bool IsUnitActionButtonLayoutTarget(string value)
+    {
+        var plain = PlainText(value);
+        return plain.Equals("STRIP", StringComparison.OrdinalIgnoreCase) ||
+               plain.Equals("SCUTTLE", StringComparison.OrdinalIgnoreCase) ||
+               plain.Equals("拆卸", StringComparison.Ordinal) ||
+               plain.Equals("自毁", StringComparison.Ordinal);
+    }
+
+    private static void ApplyUnitActionButtonLayout(Component component, string value)
+    {
+        if (!IsUnitActionButtonLayoutTarget(value))
+            return;
+
+        var instanceId = component.GetInstanceID();
+        if (component is TMP_Text tmp)
+        {
+            var rectTransform = component.GetComponent<RectTransform>();
+            if (rectTransform == null)
+                return;
+            if (!UnitActionButtonLayoutStates.TryGetValue(instanceId, out var state))
+            {
+                state = new PanelTitleLayoutState(tmp.fontSize, null, rectTransform.anchoredPosition);
+                UnitActionButtonLayoutStates[instanceId] = state;
+                Logger?.LogInfo(
+                    $"Unit action button layout: text={PlainText(value)}, type=TMP, font={tmp.fontSize:0.##}->{tmp.fontSize * UnitActionButtonFontScale:0.##}, path={BuildTransformPath(component.transform)}");
+            }
+            tmp.enableAutoSizing = false;
+            tmp.fontSize = Mathf.Max(8f, state.TmpFontSize!.Value * UnitActionButtonFontScale);
+            rectTransform.anchoredPosition = state.AnchoredPosition +
+                                             Vector2.down * state.TmpFontSize.Value * UnitActionButtonDownShiftScale;
+        }
+        else if (component is LegacyText legacy)
+        {
+            var rectTransform = component.GetComponent<RectTransform>();
+            if (rectTransform == null)
+                return;
+            if (!UnitActionButtonLayoutStates.TryGetValue(instanceId, out var state))
+            {
+                state = new PanelTitleLayoutState(null, legacy.fontSize, rectTransform.anchoredPosition);
+                UnitActionButtonLayoutStates[instanceId] = state;
+                Logger?.LogInfo(
+                    $"Unit action button layout: text={PlainText(value)}, type=Legacy, font={legacy.fontSize}->{legacy.fontSize * UnitActionButtonFontScale:0.##}, path={BuildTransformPath(component.transform)}");
+            }
+            legacy.resizeTextForBestFit = false;
+            legacy.fontSize = Mathf.Max(8, Mathf.RoundToInt(state.LegacyFontSize!.Value * UnitActionButtonFontScale));
+            rectTransform.anchoredPosition = state.AnchoredPosition +
+                                             Vector2.down * state.LegacyFontSize.Value * UnitActionButtonDownShiftScale;
+        }
+        else if (component is TextMesh textMesh)
+        {
+            if (!UnitActionButtonLayoutStates.TryGetValue(instanceId, out var state))
+            {
+                state = new PanelTitleLayoutState(
+                    null, null, default, textMesh.characterSize, textMesh.transform.localPosition);
+                UnitActionButtonLayoutStates[instanceId] = state;
+                Logger?.LogInfo(
+                    $"Unit action button layout: text={PlainText(value)}, type=TextMesh, characterSize={textMesh.characterSize:0.###}->{textMesh.characterSize * UnitActionButtonFontScale:0.###}, path={BuildTransformPath(component.transform)}");
+            }
+            textMesh.characterSize = state.TextMeshCharacterSize!.Value * UnitActionButtonFontScale;
+            textMesh.transform.localPosition = state.LocalPosition!.Value +
+                                               Vector3.down * state.TextMeshCharacterSize.Value * UnitActionButtonDownShiftScale;
+        }
+    }
+
+    private static void ApplyMotorPoolTitleFontLayout(Component component, string value)
+    {
+        var plain = PlainText(value);
+        if (!plain.Equals("MOTOR POOL", StringComparison.OrdinalIgnoreCase) &&
+            !plain.Equals("单位库", StringComparison.Ordinal))
+            return;
+
+        ApplyCompactFontLayout(
+            component,
+            MotorPoolTitleFontStates,
+            MotorPoolTitleFontScale,
+            8f,
+            "Motor-pool title");
+
+        var instanceId = component.GetInstanceID();
+        if (component.transform is RectTransform rect)
+        {
+            if (!MotorPoolTitlePositions.TryGetValue(instanceId, out var originalPosition))
+            {
+                originalPosition = rect.anchoredPosition;
+                MotorPoolTitlePositions[instanceId] = originalPosition;
+            }
+            var originalFontSize = MotorPoolTitleFontStates[instanceId].TmpFontSize ??
+                                   MotorPoolTitleFontStates[instanceId].LegacyFontSize ?? 0f;
+            rect.anchoredPosition = originalPosition +
+                                    Vector2.down * originalFontSize * MotorPoolTitleDownShiftScale;
+        }
+    }
+
+    private static void ApplyUnitCardNameFontLayout(Component component, string value)
+    {
+        if (!IsUnitCardCrewName(component))
+            return;
+
+        ApplyCompactFontLayout(
+            component,
+            UnitCardNameFontStates,
+            UnitCardNameFontScale,
+            7f,
+            "Unit-card white name");
+    }
+
+    private static bool IsUnitCardCrewName(Component component)
+    {
+        if (!component.name.Equals("name", StringComparison.OrdinalIgnoreCase) ||
+            !HasAncestorContaining(component.transform, "crewMiniNew", 3))
+            return false;
+
+        Transform? current = component.transform;
+        var depth = 0;
+        while (current != null && depth++ < 8)
+        {
+            var unitCard = current.GetComponent<UICardInstanceButton>();
+            if (unitCard != null && unitCard.unitInstance != null)
+                return true;
+            current = current.parent;
+        }
+        return false;
+    }
+
+    private static void ApplyCompactFontLayout(
+        Component component,
+        Dictionary<int, FontLayoutState> states,
+        float scale,
+        float minimum,
+        string logLabel)
+    {
+        var instanceId = component.GetInstanceID();
+        if (component is TMP_Text tmp)
+        {
+            if (!states.TryGetValue(instanceId, out var state))
+            {
+                state = new FontLayoutState(tmp.fontSize, null);
+                states[instanceId] = state;
+                Logger?.LogInfo(
+                    $"{logLabel} layout: text={PlainText(tmp.text)}, font={tmp.fontSize:0.##}->{tmp.fontSize * scale:0.##}, path={BuildTransformPath(tmp.transform)}");
+            }
+            tmp.enableAutoSizing = false;
+            tmp.fontSize = Mathf.Max(minimum, state.TmpFontSize!.Value * scale);
+        }
+        else if (component is LegacyText legacy)
+        {
+            if (!states.TryGetValue(instanceId, out var state))
+            {
+                state = new FontLayoutState(null, legacy.fontSize);
+                states[instanceId] = state;
+            }
+            legacy.resizeTextForBestFit = false;
+            legacy.fontSize = Mathf.Max(
+                Mathf.RoundToInt(minimum),
+                Mathf.RoundToInt(state.LegacyFontSize!.Value * scale));
         }
     }
 
@@ -2906,6 +3266,10 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         var normalized = value;
         if (normalized.Contains("JAMMER", StringComparison.Ordinal))
             normalized = JammerStatusTokenRegex.Replace(normalized, "干扰机");
+        if (normalized.Contains("SMOKE", StringComparison.Ordinal))
+            normalized = SmokeStatusTokenRegex.Replace(normalized, "烟幕装置");
+        if (normalized.Contains("烟幕", StringComparison.Ordinal))
+            normalized = PartiallyTranslatedSmokeStatusRegex.Replace(normalized, "烟幕装置");
         if (normalized.Contains("BROKEN", StringComparison.Ordinal))
             normalized = BrokenStatusTokenRegex.Replace(normalized, "损坏");
         if (normalized.Contains("DAMAGED", StringComparison.Ordinal))
@@ -2942,6 +3306,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         var normalized = ModuleUiTokenRegex.Replace(
             value,
             match => ModuleUiTokenTranslations[match.Value]);
+        normalized = DismountCountTokenRegex.Replace(
+            normalized,
+            match => $"{match.Groups["count"].Value}人制下车步兵");
 
         // The replenishment module presents these three ammunition classes in
         // the same dynamic multiline block. Keep LIGHT context-sensitive so it
@@ -3057,13 +3424,51 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         TranslationCacheOrder.Enqueue(source);
     }
 
+    private static void StartMappingWatcher()
+    {
+        var directory = Path.GetDirectoryName(MappingPath);
+        var fileName = Path.GetFileName(MappingPath);
+        if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(fileName) ||
+            !Directory.Exists(directory))
+        {
+            Logger?.LogWarning("External localization directory does not exist; live mapping reload is disabled.");
+            return;
+        }
+
+        try
+        {
+            MappingWatcher = new FileSystemWatcher(directory, fileName)
+            {
+                IncludeSubdirectories = false,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
+            };
+            MappingWatcher.Changed += MappingFileChanged;
+            MappingWatcher.Created += MappingFileChanged;
+            MappingWatcher.Deleted += MappingFileChanged;
+            MappingWatcher.Renamed += MappingFileRenamed;
+            MappingWatcher.EnableRaisingEvents = true;
+            Logger?.LogInfo("Watching the external localization map for file-change events.");
+        }
+        catch (System.Exception ex)
+        {
+            MappingWatcher?.Dispose();
+            MappingWatcher = null;
+            Logger?.LogWarning($"Could not watch external localization mappings: {ex.Message}");
+        }
+    }
+
+    private static void MappingFileChanged(object sender, FileSystemEventArgs args)
+    {
+        MappingReloadRequested = true;
+    }
+
+    private static void MappingFileRenamed(object sender, RenamedEventArgs args)
+    {
+        MappingReloadRequested = true;
+    }
+
     private static void ReloadMappingsIfChanged(bool force = false)
     {
-        var now = DateTime.UtcNow;
-        if (!force && MappingsLoaded && now < NextMappingCheckUtc)
-            return;
-        NextMappingCheckUtc = now + MappingCheckInterval;
-
         DateTime timestamp;
         try
         {
@@ -3074,7 +3479,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             Logger?.LogWarning($"Could not inspect external localization mappings: {ex.Message}");
             return;
         }
-        if (MappingsLoaded && timestamp == MappingTimestampUtc)
+        if (!force && MappingsLoaded && timestamp == MappingTimestampUtc)
             return;
 
         var rawMappings = new Dictionary<string, RawMapping>(StringComparer.Ordinal);
@@ -3292,8 +3697,33 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             if (component.transform is RectTransform panelRect)
                 panelRect.anchoredPosition = panelTitleState.AnchoredPosition;
             PanelTitleLayoutStates.Remove(instanceId);
-            PanelTitleComponents.Remove(instanceId);
         }
+
+        if (UnitActionButtonLayoutStates.TryGetValue(instanceId, out var actionButtonState))
+        {
+            if (component is TMP_Text actionTmp && actionButtonState.TmpFontSize.HasValue)
+                actionTmp.fontSize = actionButtonState.TmpFontSize.Value;
+            else if (component is LegacyText actionLegacy && actionButtonState.LegacyFontSize.HasValue)
+                actionLegacy.fontSize = actionButtonState.LegacyFontSize.Value;
+            else if (component is TextMesh actionTextMesh && actionButtonState.TextMeshCharacterSize.HasValue)
+            {
+                actionTextMesh.characterSize = actionButtonState.TextMeshCharacterSize.Value;
+                if (actionButtonState.LocalPosition.HasValue)
+                    actionTextMesh.transform.localPosition = actionButtonState.LocalPosition.Value;
+            }
+            if (component.transform is RectTransform actionRect)
+                actionRect.anchoredPosition = actionButtonState.AnchoredPosition;
+            UnitActionButtonLayoutStates.Remove(instanceId);
+        }
+
+        if (MotorPoolTitlePositions.TryGetValue(instanceId, out var motorPoolTitlePosition) &&
+            component.transform is RectTransform motorPoolTitleRect)
+        {
+            motorPoolTitleRect.anchoredPosition = motorPoolTitlePosition;
+        }
+        MotorPoolTitlePositions.Remove(instanceId);
+        RestoreCompactFontLayout(instanceId, component, MotorPoolTitleFontStates);
+        RestoreCompactFontLayout(instanceId, component, UnitCardNameFontStates);
 
         if (StatusOverlayFontStates.TryGetValue(instanceId, out var statusFontState))
         {
@@ -3386,6 +3816,21 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         }
 
         AppliedStates.Remove(instanceId);
+    }
+
+    private static void RestoreCompactFontLayout(
+        int instanceId,
+        Component component,
+        Dictionary<int, FontLayoutState> states)
+    {
+        if (!states.TryGetValue(instanceId, out var state))
+            return;
+
+        if (component is TMP_Text tmp && state.TmpFontSize.HasValue)
+            tmp.fontSize = state.TmpFontSize.Value;
+        else if (component is LegacyText legacy && state.LegacyFontSize.HasValue)
+            legacy.fontSize = state.LegacyFontSize.Value;
+        states.Remove(instanceId);
     }
 
     private sealed class TextState
@@ -3491,99 +3936,25 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         public LegacyText[] LegacyTexts { get; }
     }
 
-    private sealed class PendingPanelScan
-    {
-        public PendingPanelScan(GameObject root, int framesRemaining)
-        {
-            Root = root;
-            FramesRemaining = framesRemaining;
-        }
-
-        public GameObject Root { get; }
-        public int FramesRemaining { get; set; }
-    }
-
     private sealed class RefreshComponent : MonoBehaviour
     {
         private bool _firstPass = true;
-        private float _nextMappingPollTime;
 
         private void Update()
         {
-            if (Time.unscaledTime >= _nextMappingPollTime)
+            if (MappingReloadRequested)
             {
-                _nextMappingPollTime = Time.unscaledTime + 1f;
-                ReloadMappingsIfChanged();
+                MappingReloadRequested = false;
+                ReloadMappingsIfChanged(force: true);
             }
             var toggled = HandleToggleHotkey();
 
-            if (TranslationsEnabled && !TargetedUiComponentsCached)
-                CacheTargetedUiComponents();
-            if (TranslationsEnabled && TargetedUiComponentsCached &&
-                Time.unscaledTime >= NextTargetedDynamicTextEnforceTime)
-            {
-                NextTargetedDynamicTextEnforceTime =
-                    Time.unscaledTime + TargetedDynamicTextEnforceInterval;
-                EnforceCachedDynamicTexts();
-            }
-
-            if (TranslationsEnabled && (IsCampaignScene() || IsMainMenuScene()) &&
-                Time.unscaledTime >= NextPanelTitleLayoutEnforceTime)
-            {
-                NextPanelTitleLayoutEnforceTime = Time.unscaledTime + PanelTitleLayoutEnforceInterval;
-                EnforceCampaignPanelTitleLayouts();
-            }
-
-            ProcessPendingPanelScans();
-
-            var globalScanRequested = _firstPass || toggled || SceneScanRequested || PendingGlobalScanFrames > 0;
+            var globalScanRequested = _firstPass || toggled || SceneScanRequested;
             if (!globalScanRequested)
                 return;
             _firstPass = false;
             SceneScanRequested = false;
-            if (PendingGlobalScanFrames > 0)
-                PendingGlobalScanFrames--;
             ScanActiveSceneTexts();
-        }
-
-        private void LateUpdate()
-        {
-            if (!TranslationsEnabled || !IsCampaignScene())
-                return;
-
-            // The native campaign UI formats contractText during Update and
-            // bypasses every managed TMP writer. Enforce the already-cached
-            // exact control in LateUpdate, after its producer but before the
-            // frame is submitted for rendering, so HIGH is never presented.
-            var text = CachedContractDetailText;
-            if (text != null && text.gameObject.activeInHierarchy)
-                TranslateContractDangerValue(text, text.text);
-        }
-    }
-
-    private static void ProcessPendingPanelScans()
-    {
-        if (!TranslationsEnabled || PendingPanelScans.Count == 0)
-            return;
-
-        PendingPanelScanIds.Clear();
-        PendingPanelScanIds.AddRange(PendingPanelScans.Keys);
-        foreach (var instanceId in PendingPanelScanIds)
-        {
-            var pending = PendingPanelScans[instanceId];
-            if (pending.Root == null || !pending.Root.activeInHierarchy)
-            {
-                PendingPanelScans.Remove(instanceId);
-                continue;
-            }
-            // Text producers sometimes populate a newly activated panel a few
-            // frames late. Probe densely near the end of the window without
-            // walking the same hierarchy on all eight frames.
-            if (pending.FramesRemaining is 8 or 4 or 2 or 1)
-                TranslateHierarchy(pending.Root);
-            pending.FramesRemaining--;
-            if (pending.FramesRemaining <= 0)
-                PendingPanelScans.Remove(instanceId);
         }
     }
 
@@ -3611,47 +3982,4 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             TranslateCurrentComponent(text);
     }
 
-    private static void EnforceCampaignPanelTitleLayouts()
-    {
-        PanelTitleComponentIds.Clear();
-        PanelTitleComponentIds.AddRange(PanelTitleComponents.Keys);
-        foreach (var instanceId in PanelTitleComponentIds)
-        {
-            var component = PanelTitleComponents[instanceId];
-            if (component == null || !PanelTitleLayoutStates.TryGetValue(instanceId, out var state))
-            {
-                PanelTitleComponents.Remove(instanceId);
-                PanelTitleLayoutStates.Remove(instanceId);
-                continue;
-            }
-
-            if (component is TMP_Text tmp && state.TmpFontSize.HasValue)
-            {
-                var tmpRect = component.GetComponent<RectTransform>();
-                if (tmpRect == null)
-                    continue;
-                tmp.enableAutoSizing = false;
-                tmp.fontSize = Mathf.Max(10f, state.TmpFontSize.Value * CampaignPanelTitleFontScale);
-                tmpRect.anchoredPosition = state.AnchoredPosition +
-                                           Vector2.down * state.TmpFontSize.Value * CampaignPanelTitleDownShiftScale;
-            }
-            else if (component is LegacyText legacy && state.LegacyFontSize.HasValue)
-            {
-                var legacyRect = component.GetComponent<RectTransform>();
-                if (legacyRect == null)
-                    continue;
-                legacy.resizeTextForBestFit = false;
-                legacy.fontSize = Mathf.Max(10, Mathf.RoundToInt(state.LegacyFontSize.Value * CampaignPanelTitleFontScale));
-                legacyRect.anchoredPosition = state.AnchoredPosition +
-                                              Vector2.down * state.LegacyFontSize.Value * CampaignPanelTitleDownShiftScale;
-            }
-            else if (component is TextMesh textMesh && state.TextMeshCharacterSize.HasValue)
-            {
-                textMesh.characterSize = state.TextMeshCharacterSize.Value * CampaignPanelTitleFontScale;
-                if (state.LocalPosition.HasValue)
-                    textMesh.transform.localPosition = state.LocalPosition.Value +
-                                                       Vector3.down * state.TextMeshCharacterSize.Value * CampaignPanelTitleDownShiftScale;
-            }
-        }
-    }
 }

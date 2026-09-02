@@ -1095,6 +1095,7 @@ Having said that, do not underestimate the anti-tank weaponry they carry, especi
 HAZARD PAY=风险补偿
 HEALTH=耐久
 HEAVY=重型
+HEAVY MULTIPURPOSE SHOCK SQUAD, WITH A LARGE COMPLEMENT OF SMALL ARMS. IN ADDITION TO SATCHELS, RS5 AND RS30 LAUNCHERS. ORIGINALLY THESE SQUADS INCLUDED A NON-DRONED HUMAN OVERSEER, BUT RATES OF NON-CONFORMANCE DID NOT INCREASE WHEN REPLACED BY MORE EFFECTIVE DRUGS AND INCREASING DOSAGE.=重型多用途突击班，配备大量轻武器，并携带炸药包、RS5 与 RS30 发射器。此类班组最初编有一名未经无人化处理的人类督导员，但改用更有效的药物并加大剂量后，不服从率并未上升。
 HEAVY ARMOR DAMAGE=装甲严重受损
 Heavy Armor Lance=重装甲装骑分队
 Heavy Armor Platoon (1)=重装甲排（1）
@@ -1298,6 +1299,7 @@ L152S Cannon=L152S 加农炮
 L30 Autocannon=L30 机关炮
 L30B Burst Autocannon=L30B 点射机关炮
 L80 Cannon=L80 加农炮
+LARGE SUSTENANCE SECTION=大型补给舱
 Large vehicles are easy to spot, whereas infantry are more discreet, especially in buildings.=大型车辆容易被发现，而步兵更隐蔽，尤其是在建筑内。
 Large vehicles are easy to spot, whereas infantry are more discreet, especially in buildings.\nMouse over a unit to see its field of view.\nOpening fire will alert the enemy to your position. The heavier the weapon, the louder it is.=大型车辆容易被发现，而步兵更隐蔽，尤其是在建筑内。\n将鼠标悬停在单位上可查看其视野。\n开火会暴露你的位置，引起敌人警觉。武器越重，声响越大。
 last radio contact with scout platoons=与侦察排最后一次无线电联络

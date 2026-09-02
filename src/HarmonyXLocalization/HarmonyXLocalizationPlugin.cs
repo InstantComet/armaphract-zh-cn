@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.79";
+    public const string Version = "1.9.80";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -2480,7 +2480,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ApplyMotorPoolTitleFontLayout(component, plainSource);
         ApplyUnitCardNameFontLayout(component, translated);
         var normalizedObjectiveSource = ObjectiveCounterRegex.Replace(plainSource, string.Empty).Trim();
-        if (component is TMP_Text && ObjectiveTitles.Contains(normalizedObjectiveSource))
+        if (component is TMP_Text &&
+            !HasAncestorNamed(component.transform, "allMissionData", 14) &&
+            ObjectiveTitles.Contains(normalizedObjectiveSource))
             return ApplyCompactTitleVerticalOffset(translated, ObjectiveTitleVerticalOffsetTag);
         if (component is TMP_Text &&
             TryGetCompactTitleVerticalOffsetTag(component, plainSource, out var offsetTag))
@@ -2748,6 +2750,11 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 
     private static void ApplyObjectiveFontLayout(Component component, string plainSource)
     {
+        // "assault" is also a mission-type value in the all-contracts list.
+        // Objective scaling must not shrink that list entry.
+        if (HasAncestorNamed(component.transform, "allMissionData", 14))
+            return;
+
         var normalizedSource = ObjectiveCounterRegex.Replace(plainSource, string.Empty).Trim();
         var scale = ObjectiveTitles.Contains(normalizedSource)
             ? 0.72f

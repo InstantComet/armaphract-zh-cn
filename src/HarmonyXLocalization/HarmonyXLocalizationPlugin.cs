@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.76";
+    public const string Version = "1.9.79";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -153,6 +153,19 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Regex PartiallyTranslatedSmokeStatusRegex = new(
         @"烟幕(?=\s+(?:BROKEN|损坏)(?![A-Za-z]))",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex AutoloaderFeedIssueStatusRegex = new(
+        @"(?<![A-Za-z])AUTOLOADER\s+FEED\s+ISSUE(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex DynamicStatusModuleTokenRegex = new(
+        @"(?<![A-Za-z])(?:AUTOLOADER|HOWITZER|NETTING|STOWAGE)(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Dictionary<string, string> DynamicStatusModuleTranslations = new(StringComparer.Ordinal)
+    {
+        ["AUTOLOADER"] = "自动装弹机",
+        ["HOWITZER"] = "榴弹炮",
+        ["NETTING"] = "伪装网",
+        ["STOWAGE"] = "外置储物架"
+    };
     private static readonly Regex ChineseCharacterRegex = new(
         @"[\u3400-\u9fff]",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -342,6 +355,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private const string AsperaNameVerticalOffsetTag = "<voffset=-7px>";
     private const string ContractTitleVerticalOffsetTag = "<voffset=-5px>";
     private const string MotorPoolTitleVerticalOffsetTag = "<voffset=-6px>";
+    private const string ObjectiveTitleVerticalOffsetTag = "<voffset=-3px>";
     private const string ContractDetailLabelLineHeightTag = "<line-height=95%>";
     private const string MainMenuSceneName = "0StartView";
     private static readonly HashSet<GUIStyle> ActiveManualGuideStyles = new();
@@ -2465,6 +2479,9 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ApplyUnitActionButtonLayout(component, plainSource);
         ApplyMotorPoolTitleFontLayout(component, plainSource);
         ApplyUnitCardNameFontLayout(component, translated);
+        var normalizedObjectiveSource = ObjectiveCounterRegex.Replace(plainSource, string.Empty).Trim();
+        if (component is TMP_Text && ObjectiveTitles.Contains(normalizedObjectiveSource))
+            return ApplyCompactTitleVerticalOffset(translated, ObjectiveTitleVerticalOffsetTag);
         if (component is TMP_Text &&
             TryGetCompactTitleVerticalOffsetTag(component, plainSource, out var offsetTag))
             return ApplyCompactTitleVerticalOffset(translated, offsetTag);
@@ -2734,7 +2751,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         var normalizedSource = ObjectiveCounterRegex.Replace(plainSource, string.Empty).Trim();
         var scale = ObjectiveTitles.Contains(normalizedSource)
             ? 0.72f
-            : ObjectiveDetails.Contains(normalizedSource) ? 1.45f : 0f;
+            : ObjectiveDetails.Contains(normalizedSource) ? 1.9f : 0f;
         if (scale <= 0f)
             return;
 
@@ -3315,6 +3332,10 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static bool TryNormalizeDynamicStatusTokens(string value, out string translated)
     {
         var normalized = value;
+        normalized = AutoloaderFeedIssueStatusRegex.Replace(normalized, "自动装弹机供弹故障");
+        normalized = DynamicStatusModuleTokenRegex.Replace(
+            normalized,
+            match => DynamicStatusModuleTranslations[match.Value]);
         if (normalized.Contains("JAMMER", StringComparison.Ordinal))
             normalized = JammerStatusTokenRegex.Replace(normalized, "干扰机");
         if (normalized.Contains("SMOKE", StringComparison.Ordinal))

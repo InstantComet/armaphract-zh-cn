@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.80";
+    public const string Version = "1.9.85";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -51,6 +51,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Dictionary<int, PanelTitleLayoutState> UnitActionButtonLayoutStates = new();
     private static readonly Dictionary<int, FontLayoutState> MotorPoolTitleFontStates = new();
     private static readonly Dictionary<int, FontLayoutState> UnitCardNameFontStates = new();
+    private static readonly Dictionary<int, FontLayoutState> CrewManagementSectionTitleFontStates = new();
     private static readonly Dictionary<int, Vector2> MotorPoolTitlePositions = new();
     private static readonly HashSet<int> ModuleDetailTextLoggedIds = new();
     private static TMP_Text? CachedContractDetailText;
@@ -144,6 +145,12 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Regex StunnedStatusTokenRegex = new(
         @"(?<![A-Za-z])STUNNED(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex CriticalStatusTokenRegex = new(
+        @"(?<![A-Za-z])CRITICAL(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex MunitionsCriticalStatusRegex = new(
+        @"(?<![A-Za-z])(?:MUNITIONS|弹药配置)\s+CRITICAL(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex JammerStatusTokenRegex = new(
         @"(?<![A-Za-z])JAMMER(?=\s+(?:BROKEN|损坏)(?![A-Za-z]))",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -157,14 +164,16 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         @"(?<![A-Za-z])AUTOLOADER\s+FEED\s+ISSUE(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex DynamicStatusModuleTokenRegex = new(
-        @"(?<![A-Za-z])(?:AUTOLOADER|HOWITZER|NETTING|STOWAGE)(?![A-Za-z])",
+        @"(?<![A-Za-z])(?:TRAUMA KIT|AUTOLOADER|HOWITZER|NETTING|STOWAGE|THERMALS)(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Dictionary<string, string> DynamicStatusModuleTranslations = new(StringComparer.Ordinal)
     {
         ["AUTOLOADER"] = "自动装弹机",
         ["HOWITZER"] = "榴弹炮",
         ["NETTING"] = "伪装网",
-        ["STOWAGE"] = "外置储物架"
+        ["STOWAGE"] = "外置储物架",
+        ["THERMALS"] = "热成像设备",
+        ["TRAUMA KIT"] = "创伤急救包"
     };
     private static readonly Regex ChineseCharacterRegex = new(
         @"[\u3400-\u9fff]",
@@ -200,7 +209,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         @"Instant[_ ]?Comet\s*汉化",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex ModuleUiTokenRegex = new(
-        @"(?<![A-Za-z])(?:INFANTRY REPLENISHMENT SECTION|ANTI-TANK MISSILE|MEDICAL MATERIALS|REPAIR MATERIALS|TURRET TRAVERSE|AMMUNITION REPLENISHMENT|AMMO REPLENISHMENT|ENGINE POWER|REVERSE GEAR|TURN SPEED|ACCELERATION|PROTECTION|COOLDOWN|APPLIQUE|REACTIVE|DURATION|TORQUE|RANGE|TYPE)(?![A-Za-z])",
+        @"(?<![A-Za-z])(?:INFANTRY REPLENISHMENT SECTION|ANTI-TANK MISSILE|MEDICAL MATERIALS|REPAIR MATERIALS|TURRET TRAVERSE|AMMUNITION REPLENISHMENT|AMMO REPLENISHMENT|ENGINE POWER|REVERSE GEAR|TURN SPEED|ACCELERATION|ADVANCED\s*ERA|PROTECTION|COOLDOWN|APPLIQUE|REACTIVE|DURATION|TORQUE|RANGE|TYPE)(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex ReplenishmentClassTokenRegex = new(
         @"(?<![A-Za-z])(?:LIGHT|HEAVY|ADVANCED)(?![A-Za-z])",
@@ -242,6 +251,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ["REVERSE GEAR"] = "倒车挡",
         ["TURN SPEED"] = "转向速度",
         ["ACCELERATION"] = "加速度",
+        ["ADVANCEDERA"] = "先进型反应装甲",
+        ["ADVANCED ERA"] = "先进型反应装甲",
         ["PROTECTION"] = "防护",
         ["COOLDOWN"] = "冷却时间",
         ["APPLIQUE"] = "附加式",
@@ -352,6 +363,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private const float MotorPoolTitleFontScale = 0.64f;
     private const float MotorPoolTitleDownShiftScale = 0f;
     private const float UnitCardNameFontScale = 0.58f;
+    private const float CrewManagementSectionTitleFontScale = 0.70f;
     private const string AsperaNameVerticalOffsetTag = "<voffset=-7px>";
     private const string ContractTitleVerticalOffsetTag = "<voffset=-5px>";
     private const string MotorPoolTitleVerticalOffsetTag = "<voffset=-6px>";
@@ -1346,6 +1358,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         UnitActionButtonLayoutStates.Clear();
         MotorPoolTitleFontStates.Clear();
         UnitCardNameFontStates.Clear();
+        CrewManagementSectionTitleFontStates.Clear();
         MotorPoolTitlePositions.Clear();
         ModuleDetailTextLoggedIds.Clear();
         CachedContractDetailText = null;
@@ -1434,6 +1447,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ApplyUnitActionButtonLayout(component, current);
         ApplyMotorPoolTitleFontLayout(component, current);
         ApplyUnitCardNameFontLayout(component, current);
+        ApplyCrewManagementSectionTitleFontLayout(component, current);
         // Inactive submenu labels can already have been translated by the
         // initial include-inactive scan.  Apply their layout before the
         // last-value fast path so opening the submenu still enlarges every
@@ -1810,7 +1824,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
                UnsafeStatusTokenRegex.IsMatch(value) ||
                RoutedStatusTokenRegex.IsMatch(value) ||
                BleedoutStatusTokenRegex.IsMatch(value) ||
-               StunnedStatusTokenRegex.IsMatch(value);
+               StunnedStatusTokenRegex.IsMatch(value) ||
+               CriticalStatusTokenRegex.IsMatch(value);
     }
 
     private static bool TryStripStatusPlaceholderLines(string value, out string stripped)
@@ -2255,6 +2270,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ApplyUnitActionButtonLayout(component, value);
         ApplyMotorPoolTitleFontLayout(component, value);
         ApplyUnitCardNameFontLayout(component, value);
+        ApplyCrewManagementSectionTitleFontLayout(component, value);
         ApplyPauseMenuButtonFontLayout(component, value);
         if (IsOptionsLeftLabel(value))
             RegisterAndApplyOptionsMenuFont(component);
@@ -2479,6 +2495,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         ApplyUnitActionButtonLayout(component, plainSource);
         ApplyMotorPoolTitleFontLayout(component, plainSource);
         ApplyUnitCardNameFontLayout(component, translated);
+        ApplyCrewManagementSectionTitleFontLayout(component, plainSource);
         var normalizedObjectiveSource = ObjectiveCounterRegex.Replace(plainSource, string.Empty).Trim();
         if (component is TMP_Text &&
             !HasAncestorNamed(component.transform, "allMissionData", 14) &&
@@ -2562,11 +2579,13 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         return plain.EndsWith(" BROKEN", StringComparison.OrdinalIgnoreCase) ||
                plain.EndsWith(" DAMAGED", StringComparison.OrdinalIgnoreCase) ||
                plain.EndsWith(" REDUCED", StringComparison.OrdinalIgnoreCase) ||
+               plain.EndsWith(" CRITICAL", StringComparison.OrdinalIgnoreCase) ||
                plain.StartsWith("INSUFFICIENT ", StringComparison.OrdinalIgnoreCase) ||
                plain.StartsWith("LOW ", StringComparison.OrdinalIgnoreCase) ||
                plain.EndsWith("损坏", StringComparison.Ordinal) ||
                plain.EndsWith("受损", StringComparison.Ordinal) ||
                plain.EndsWith("降低", StringComparison.Ordinal) ||
+               plain.EndsWith("危急", StringComparison.Ordinal) ||
                plain.StartsWith("发动机功率不足", StringComparison.Ordinal) ||
                plain.StartsWith("发动机扭矩过低", StringComparison.Ordinal);
     }
@@ -2946,6 +2965,36 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             UnitCardNameFontScale,
             7f,
             "Unit-card white name");
+    }
+
+    private static void ApplyCrewManagementSectionTitleFontLayout(Component component, string value)
+    {
+        var plain = PlainText(value).Trim();
+        var isRequestedTitle =
+            plain.Equals("ARMAPHRACT", StringComparison.OrdinalIgnoreCase) ||
+            plain.Equals("装甲重骑", StringComparison.Ordinal) ||
+            plain.Equals("Merc Grunt", StringComparison.OrdinalIgnoreCase) ||
+            plain.Equals("佣兵士兵", StringComparison.Ordinal);
+        if (!isRequestedTitle || !IsCampaignScene())
+            return;
+
+        // These names also occur on small crew cards. Only resize the large
+        // yellow section headers shown in the crew-management panel.
+        var isLargeHeader = component switch
+        {
+            TMP_Text tmp => tmp.fontSize >= 20f,
+            LegacyText legacy => legacy.fontSize >= 20,
+            _ => false
+        };
+        if (!isLargeHeader)
+            return;
+
+        ApplyCompactFontLayout(
+            component,
+            CrewManagementSectionTitleFontStates,
+            CrewManagementSectionTitleFontScale,
+            10f,
+            "Crew-management section title");
     }
 
     private static bool IsUnitCardCrewName(Component component)
@@ -3339,6 +3388,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static bool TryNormalizeDynamicStatusTokens(string value, out string translated)
     {
         var normalized = value;
+        normalized = MunitionsCriticalStatusRegex.Replace(normalized, "弹药状态危急");
         normalized = AutoloaderFeedIssueStatusRegex.Replace(normalized, "自动装弹机供弹故障");
         normalized = DynamicStatusModuleTokenRegex.Replace(
             normalized,
@@ -3365,6 +3415,8 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             normalized = BleedoutStatusTokenRegex.Replace(normalized, "失血");
         if (normalized.Contains("STUNNED", StringComparison.Ordinal))
             normalized = StunnedStatusTokenRegex.Replace(normalized, "眩晕");
+        if (normalized.Contains("CRITICAL", StringComparison.Ordinal))
+            normalized = CriticalStatusTokenRegex.Replace(normalized, "危急");
 
         if (string.Equals(value, normalized, StringComparison.Ordinal))
         {
@@ -3803,6 +3855,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         MotorPoolTitlePositions.Remove(instanceId);
         RestoreCompactFontLayout(instanceId, component, MotorPoolTitleFontStates);
         RestoreCompactFontLayout(instanceId, component, UnitCardNameFontStates);
+        RestoreCompactFontLayout(instanceId, component, CrewManagementSectionTitleFontStates);
 
         if (StatusOverlayFontStates.TryGetValue(instanceId, out var statusFontState))
         {

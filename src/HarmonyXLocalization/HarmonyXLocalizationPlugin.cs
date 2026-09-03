@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.99";
+    public const string Version = "1.9.100";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -219,7 +219,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly HashSet<string> ExactUiOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "COMMAND", "DRIVER", "GUNNER", "LOADER", "type",
+        "COMMAND", "DRIVER", "GUNNER", "LOADER", "type", "interceptor",
         "FAIR", "MEDIUM", "LOW", "WEAK", "FALLING",
         "STUNNED", "LIGHT", "HEAVY", "ADVANCED"
     };

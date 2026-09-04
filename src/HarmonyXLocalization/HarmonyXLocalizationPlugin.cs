@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.100";
+    public const string Version = "1.9.101";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -196,6 +196,14 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly Regex ContractExtremeValueRegex = new(
         @"(?<![A-Za-z])EXTREME(?![A-Za-z])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Dictionary<string, string> CombatUnitWidgetTokenTranslations = new(StringComparer.Ordinal)
+    {
+        ["PLAYER"] = "玩家",
+        ["HIGH"] = "高",
+        ["MED"] = "中",
+        ["LOW"] = "低",
+        ["FAIR"] = "一般"
+    };
     private static readonly Regex CampaignDayCounterRegex = new(
         @"^\s*(?:DAY|日)\s*[:：]?\s*(\d+)\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -414,6 +422,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         PatchOptionsMenu(harmony);
         PatchCampaignMissionData(harmony);
         PatchUnitCardLayout(harmony);
+        PatchCombatUnitWidget(harmony);
         PatchArmoryModuleData(harmony);
         PatchInventoryModuleData(harmony);
         PatchSceneLoaded(harmony);
@@ -810,6 +819,43 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         {
             TranslateCurrentComponent(text);
             ApplyUnitCardNameFontLayout(text, text.text);
+        }
+    }
+
+    private static void PatchCombatUnitWidget(Harmony harmony)
+    {
+        var method = AccessTools.Method(typeof(Unit), nameof(Unit.UpdateUnitUI), Type.EmptyTypes);
+        if (method == null)
+        {
+            Logger?.LogWarning("Could not find Unit.UpdateUnitUI for combat unit-widget localization.");
+            return;
+        }
+
+        harmony.Patch(
+            method,
+            postfix: new HarmonyMethod(
+                typeof(HarmonyXLocalizationPlugin), nameof(CombatUnitWidgetPostfix)));
+        Logger?.LogInfo("Patched Unit.UpdateUnitUI for combat unit-widget dynamic labels.");
+    }
+
+    private static void CombatUnitWidgetPostfix(Unit __instance)
+    {
+        if (!TranslationsEnabled || __instance?.unitDataWidget == null)
+            return;
+
+        foreach (var text in __instance.unitDataWidget.GetComponentsInChildren<TMP_Text>(true))
+        {
+            var current = text.text;
+            var parsed = text.GetParsedText();
+            var source = !string.IsNullOrWhiteSpace(parsed) &&
+                         CombatUnitWidgetTokenTranslations.ContainsKey(parsed.Trim())
+                ? parsed
+                : current;
+            var token = PlainText(source).Trim();
+            if (!CombatUnitWidgetTokenTranslations.TryGetValue(token, out var translated))
+                continue;
+
+            SetComponentText(text, current, translated);
         }
     }
 

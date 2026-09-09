@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.101";
+    public const string Version = "1.9.102";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -421,6 +421,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
         PatchPauseMenu(harmony);
         PatchOptionsMenu(harmony);
         PatchCampaignMissionData(harmony);
+        PatchMissionBriefing(harmony);
         PatchUnitCardLayout(harmony);
         PatchCombatUnitWidget(harmony);
         PatchArmoryModuleData(harmony);
@@ -1117,6 +1118,34 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
             TranslateContractDangerValue(text, text.text);
             break;
         }
+    }
+
+    private static void PatchMissionBriefing(Harmony harmony)
+    {
+        var postfix = new HarmonyMethod(
+            typeof(HarmonyXLocalizationPlugin), nameof(MissionBriefingOpenedPostfix));
+        harmony.Patch(
+            AccessTools.Method(typeof(BriefingUI), nameof(BriefingUI.OpenMissionData),
+                new[] { typeof(MissionData) }),
+            postfix: postfix);
+        harmony.Patch(
+            AccessTools.Method(typeof(BriefingUI), nameof(BriefingUI.OpenMissionDataNoReload),
+                Type.EmptyTypes),
+            postfix: postfix);
+        Logger?.LogInfo("Patched BriefingUI open methods for first-display tactical-map translation.");
+    }
+
+    private static void MissionBriefingOpenedPostfix()
+    {
+        if (!TranslationsEnabled)
+            return;
+
+        // Briefing prefabs carry serialized labels: instantiation does not call
+        // the patched text setters, and can happen after SetActive/scene scans.
+        // Scan after the open method has finished creating the map, including
+        // world-space labels outside the normal UI activation hierarchy. This
+        // is the same one-shot scan used by Alt+T, before the first render.
+        ScanActiveSceneTexts();
     }
 
     private static void PatchSceneLoaded(Harmony harmony)

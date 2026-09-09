@@ -20,7 +20,7 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
 {
     public const string Guid = "armaphract.harmonyx.unitintro";
     public const string Name = "Armaphract HarmonyX Localization";
-    public const string Version = "1.9.102";
+    public const string Version = "1.9.103";
 
     private static ManualLogSource? Logger;
     private static bool CandidateLogged;
@@ -82,8 +82,10 @@ public sealed class HarmonyXLocalizationPlugin : BasePlugin
     private static readonly HashSet<string> FragmentedTranslationsLogged = new(StringComparer.Ordinal);
     private static readonly HashSet<string> UntranslatedCombatChatterLogged = new(StringComparer.Ordinal);
     private static readonly Regex HtmlTagRegex = new("<[^>]+>", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    // Objective status can be a counter, [X], or an empty checkbox. Strip only
+    // trailing markers for layout matching; keep them in the displayed text.
     private static readonly Regex ObjectiveCounterRegex = new(
-        @"\s*\[\d+\s*/\s*\d+\]\s*$",
+        @"(?:\s*\[\s*(?:\d+\s*/\s*\d+|[xX])?\s*\]\s*)+$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex RepairEtaRegex = new(
         @"^\s*repairs\s+complete\s+in\s+(\d+)\s+days?\s*$",
